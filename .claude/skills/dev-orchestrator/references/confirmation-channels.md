@@ -19,7 +19,7 @@ Orchestrator からユーザーへの**すべての**確認（エスカレーシ
 ```yaml
 type: confirm | notify        # confirm = 回答が必要 / notify = 報告のみ
 feature: <feature-name>
-gate: A | B | C | D | none    # 対応するゲート（フェーズ外のエラー等は none）
+gate: S | A | B | C | D | E | none    # 対応するゲート（フェーズ外のエラー等は none）
 title: <1行の件名>
 context: |
   判断に必要な背景の要約（3〜10行）。何が起き、なぜユーザーの判断が必要かを自己完結で書く
