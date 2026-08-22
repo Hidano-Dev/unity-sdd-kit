@@ -45,6 +45,7 @@ sandbox bypass の確認として、実行前後の作業ツリーを**状態と
 set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
+trap 'rm -rf "$VAL_TMP"' ERR
 GIT_COMMON=$(git rev-parse --git-common-dir)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain > "$VAL_TMP/tree-before.txt"
@@ -52,7 +53,7 @@ git diff HEAD > "$VAL_TMP/content-before.patch"
 git ls-files -v > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -89,7 +90,7 @@ git diff HEAD > "$VAL_TMP/content-after.patch"
 git ls-files -v > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -124,7 +125,8 @@ echo "AUDIT_END"
 > - **ベースラインの改ざん検知**: codex は同一 OS ユーザーの unrestricted プロセスとして動くため、一時ディレクトリを探索して `*-before` ファイルを書き換え、監査を空振りさせることが理論上可能。対策として呼び出し A が `BASELINE_HASHES` としてベースラインファイル自体のハッシュを**会話ログ（codex から到達不能な信頼記録）**に残し、呼び出し C の冒頭で `BASELINE_VERIFY` として再計算する。両者は**呼び出し A の出力と突き合わせて**一致を確認する。
 > - **追跡済みファイルは Git の表示に依存せず独立ハッシュする**（`TRACKED_DIFF`）。`assume-unchanged` / `skip-worktree` が設定されたファイルは変更しても `git status` / `git diff HEAD` に現れず、codex 自身が index フラグを設定することもできるため。フラグ設定そのものも `git ls-files -v` の前後比較（`INDEXFLAGS_DIFF`）で検出する。
 > - **Git メタデータも監査対象**（`GITMETA_DIFF`）: hooks 配下と `config` をハッシュ比較する。監査外のまま hooks や config（`core.hooksPath`・credential helper 等）を仕込まれると、後続の Gate E の `git push` で親ユーザー権限のフックが起動するため。
->   - hooks は内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録する。内容ハッシュだけでは **symlink hook の追加や既存 hook への `chmod +x`** を検出できないため。
+>   - hooks は内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録する。内容ハッシュだけでは **symlink hook の追加や既存 hook への `chmod +x`** を検出できないため。内容ハッシュは symlink も対象に含める（`sha256sum` はリンクを辿って**参照先の内容**をハッシュするため、リポジトリ外の参照先だけを書き換える改変も検出できる）。
+>   - 呼び出し A は `trap 'rm -rf "$VAL_TMP"' ERR` を設定し、ベースライン取得の途中失敗時にも一時ディレクトリを残さない（失敗時は `VAL_TMP=` が呼び出し元に渡らず、後段の削除処理に到達できないため）。
 >   - hooks の場所は `core.hooksPath` を反映する `git rev-parse --git-path hooks` で**有効な** hooks ディレクトリを解決する。また `git config --show-origin --list` で**全スコープ（system / global / local / worktree）の設定と origin** を記録する。`git config --global core.hooksPath <外部>` のような、リポジトリ外スコープ経由のフック差し替えを検出するため。
 >   - 共有 `config` のパスは `git rev-parse --git-common-dir` で解決する。linked worktree では `--git-dir` が `.git/worktrees/<name>`（config / hooks を持たない）を返し、ベースライン取得が毎回失敗して codex-first 経路が使えなくなるため。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。

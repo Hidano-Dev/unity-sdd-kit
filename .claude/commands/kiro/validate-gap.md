@@ -33,15 +33,17 @@ Codex の存在確認:
 set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
+trap 'rm -rf "$VAL_TMP"' ERR
 GIT_COMMON=$(git rev-parse --git-common-dir)
 RESEARCH=".kiro/specs/$1/research.md"
+if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-before.txt"; else echo "ABSENT" > "$VAL_TMP/research-before.txt"; fi
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-before.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
 git ls-files -v > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" != "$RESEARCH" ] && [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
 git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -73,17 +75,20 @@ sha256sum -- "$VAL_TMP"/*-before*
 echo "BASELINE_VERIFY_END"
 GIT_COMMON=$(git rev-parse --git-common-dir)
 RESEARCH=".kiro/specs/$1/research.md"
+if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-after.txt"; else echo "ABSENT" > "$VAL_TMP/research-after.txt"; fi
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-after.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-after.patch"
 git ls-files -v > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" != "$RESEARCH" ] && [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
 git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
+echo "RESEARCH_DIFF_START"
+diff "$VAL_TMP/research-before.txt" "$VAL_TMP/research-after.txt"
 echo "HEAD_DIFF_START"
 diff "$VAL_TMP/head-before.txt" "$VAL_TMP/head-after.txt"
 echo "TREE_DIFF_START"
@@ -106,6 +111,7 @@ echo "AUDIT_END"
 > **Note:**
 > - ignored ファイル（`.env` やローカル設定）も監査対象に含める（`git status` / `git diff` に現れないため）。ネストした生成物ディレクトリは `(^|/)` パターンで除外する。設定ファイル類を除外パターンに追加してはならない。
 > - `BASELINE_VERIFY` は呼び出し A が会話ログ（codex から到達不能な信頼記録）に残した `BASELINE_HASHES` と突き合わせ、codex によるベースラインファイルの書き換えを検知する。
+> - hooks の内容ハッシュは symlink も対象に含める（`sha256sum` はリンクを辿って参照先の内容をハッシュするため、参照先だけの書き換えも検出できる）。呼び出し A は `trap 'rm -rf "$VAL_TMP"' ERR` でベースライン取得の途中失敗時にも一時ディレクトリを残さない。`research-before/after` は許可された research.md の**保存契約の履行確認**専用で、書き込み監査の違反判定には含めない。
 > - 追跡済みファイルは Git の表示に依存せず独立ハッシュする（`TRACKED_DIFF`。`assume-unchanged` / `skip-worktree` による隠蔽対策）。index フラグは `INDEXFLAGS_DIFF`、hooks / `config` は `GITMETA_DIFF` で前後比較する（監査外のまま hooks / config を仕込まれると後続の `git push` 等で親ユーザー権限のフックが起動するため）。hooks は内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録し、symlink hook の追加や `chmod +x` も検出する。hooks の場所は `core.hooksPath` を反映する `git rev-parse --git-path hooks` で解決し、`git config --show-origin --list` で全スコープ（system / global / local / worktree）の設定と origin も記録する（グローバル設定経由のフック差し替え対策）。共有 `config` は linked worktree でも共有ディレクトリを指す `git rev-parse --git-common-dir` で解決する。
 
 > **Note:**
@@ -125,7 +131,7 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
 
 判定は Bash tool の終了コードではなく、**出力末尾の `CODEX_EXIT=` マーカー**で行う（`tee` と代入により Bash 呼び出し自体は成功扱いになるため）。
 
-- **`CODEX_EXIT=0`** → codex の出力を検証レポートとして扱う。`.kiro/specs/$1/research.md` が作成・更新されていることを Read で確認したうえで Display Result へ進む（更新されていなければ失敗扱いで Step 3 へ）。
+- **`CODEX_EXIT=0`** → codex の出力を検証レポートとして扱う。research.md の更新は Read だけでは「更新された」と「以前から存在するだけ」を区別できないため、**呼び出し C の `RESEARCH_DIFF` が空でない**（= 実際に作成・追記が発生した）ことを必ず確認する。`RESEARCH_DIFF` が空なら canonical skill の保存契約が果たされていないので失敗扱いで Step 3 へ。内容の妥当性確認には Read を使う。
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
