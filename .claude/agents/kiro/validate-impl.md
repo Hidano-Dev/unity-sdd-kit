@@ -77,10 +77,17 @@ For each task, verify:
 - If not completed, flag as "Task not marked complete"
 
 #### Test Coverage Check
+- Discover the repository's canonical validation commands from project scripts/manifests, task runners, CI configs, and README (TEST_COMMANDS / BUILD_COMMANDS / SMOKE_COMMANDS); prefer commands already used by repo automation
 - Tests exist for task-related functionality
 - Tests pass (no failures or errors)
-- Use Bash to run test commands (e.g., `npm test`, `pytest`)
+- Use Bash to run the discovered test commands (e.g., `npm test`, `pytest`)
 - If tests fail or don't exist, flag as "Test coverage issue"
+- If no canonical test command can be identified or executed, the final decision MUST be `MANUAL_VERIFY_REQUIRED` (never GO)
+
+#### Runtime Liveness Check (Smoke Boot)
+- Run the discovered smoke command that proves the built artifact starts and reaches its first usable state (e.g., CLI `--help`, service health endpoint, app launch)
+- Boot-time crash, unhandled exception, or missing required env/config → NO-GO
+- If no trustworthy smoke command can be identified, or the runtime environment is unavailable → `MANUAL_VERIFY_REQUIRED`
 
 #### Requirements Traceability
 - Identify EARS requirements related to the task
@@ -93,10 +100,33 @@ For each task, verify:
 - Use Grep/Glob to confirm file structure matches design
 - If misalignment found, flag as "Design deviation"
 
+#### Cross-Task Integration
+- Identify where tasks share interfaces, data models, or API contracts
+- Verify that one task's output format matches the next task's expected input; check for conflicting assumptions between tasks (naming conventions, error codes, data shapes)
+- Verify shared state (database schemas, config, environment) is consistent across tasks
+- If contracts or shared state are inconsistent, flag as "Cross-task integration issue" (blocks GO)
+
+#### Boundary Audit
+- Compare completed work against design.md's Boundary Commitments / Out of Boundary / Allowed Dependencies / Revalidation Triggers (when present)
+- Flag cross-task spillover where one area absorbed another boundary's responsibility, and hidden dependencies not declared in the design
+- If a Revalidation Trigger fired (a committed boundary changed), verify the affected adjacent specs or integration points were actually re-checked; if not, flag it — an unverified fired trigger blocks GO
+
 #### Regression Check
 - Run full test suite (if available)
 - Verify no existing tests are broken
 - If regressions detected, flag as "Regression detected"
+
+#### Residual Marker Check (mechanical)
+- Grep files in the feature boundary for `TBD|TODO|FIXME|HACK|XXX`
+- Matches introduced by this feature → flag as Warning
+
+#### Hardcoded Secrets Check (mechanical)
+- Grep files in the feature boundary (case-insensitive) for `password\s*=|api_key\s*=|secret\s*=|token\s*=`
+- Matches that are not environment-variable references → flag as **Critical** (blocks GO)
+
+#### Blocked Tasks & Implementation Notes
+- Check tasks.md for tasks still marked `_Blocked:_` — report why and assess impact on feature completeness
+- Review `## Implementation Notes` in tasks.md for cross-cutting insights that need attention
 
 ### 4. Generate Report
 
@@ -104,7 +134,11 @@ Provide summary in the language specified in spec.json:
 - Validation summary by feature
 - Coverage report (tasks, requirements, design)
 - Issues and deviations with severity (Critical/Warning)
-- GO/NO-GO decision
+- DECISION: GO | NO-GO | MANUAL_VERIFY_REQUIRED
+  - `GO` only when all mandatory checks (full tests, smoke boot, secrets grep clean, coverage, design alignment, cross-task integration consistency, boundary audit, no unresolved `_Blocked:_` tasks) actually ran and passed
+  - Before returning `GO`, apply the `kiro-verify-completion` protocol (`.agents/skills/kiro-verify-completion/SKILL.md`) to the feature-level claim with fresh evidence — tests alone are insufficient
+  - `NO-GO` for concrete failures (including Critical hardcoded-secrets findings)
+  - `MANUAL_VERIFY_REQUIRED` when a mandatory validation could not be identified or executed — name the exact missing step or environment prerequisite. Never collapse this state into GO
 
 ## Important Constraints
 - **Conversation-aware**: Prioritize conversation history for auto-detection
@@ -127,7 +161,7 @@ Provide output in the language specified in spec.json with:
 2. **Validation Summary**: Brief overview per feature (pass/fail counts)
 3. **Issues**: List of validation failures with severity and location
 4. **Coverage Report**: Requirements/design/task coverage percentages
-5. **Decision**: GO (ready for next phase) / NO-GO (needs fixes)
+5. **Decision**: GO (ready for next phase) / NO-GO (needs fixes) / MANUAL_VERIFY_REQUIRED (mandatory validation could not run — not complete)
 
 **Format Requirements**:
 - Use Markdown headings and tables for clarity
@@ -138,7 +172,7 @@ Provide output in the language specified in spec.json with:
 
 ### Error Scenarios
 - **No Implementation Found**: If no `/kiro:spec-impl` in history and no `[x]` tasks, report "No implementations detected"
-- **Test Command Unknown**: If test framework unclear, warn and skip test validation (manual verification required)
+- **Test Command Unknown**: If the test framework or command cannot be identified, return `MANUAL_VERIFY_REQUIRED` and name the missing validation step; never return GO in this state
 - **Missing Spec Files**: If spec.json/requirements.md/design.md missing, stop with error
 - **Language Undefined**: Default to English (`en`) if spec.json doesn't specify language
 

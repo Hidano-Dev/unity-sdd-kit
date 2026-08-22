@@ -131,6 +131,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - **1 つでも OK のタスクがあれば必ず 1 回実行する**（部分成功でも、できた分の実装を検証する価値があるため）
 - OK がゼロ（全 FAIL/TIMEOUT/SKIPPED）の場合は実行せず、`SKIPPED (no completed tasks)` として記録
 - **この検証はソフトゲート**: コマンドがプロジェクトに存在しない・エラーになった場合は `SKIPPED` として理由を記録し、サマリーへ進む。検証で問題が報告されても自動修正は試みない — 指摘内容をサマリーに転記するだけに留める（無人実行中に検証起点の修正ループへ入らない）
+- **判定の記録**: validate-impl の DECISION（`GO` / `NO-GO` / `MANUAL_VERIFY_REQUIRED`）をそのまま記録する。`MANUAL_VERIFY_REQUIRED` は「重大な指摘なし」ではなく**独立した非通過結果**（必須検証が実行不能で完了を主張できない状態）であり、GO に丸めない。不足している検証手順・環境前提もあわせて転記する
 - サブコマンド出力内の「次のステップ」案内は無視する
 
 ## Summary
@@ -142,11 +143,13 @@ After all tasks complete, display a summary table:
 | ...     | ...   | codex / claude-fallback | OK/FAIL/TIMEOUT/SKIPPED |
 
 サマリーテーブルの直後に **Validation Results** を必ず記載する:
-- validate-impl: <PASSED / 指摘あり（内容の要約） / SKIPPED（理由）>
+- validate-impl DECISION: <GO / NO-GO（内容の要約） / MANUAL_VERIFY_REQUIRED（不足している検証手順・環境前提） / SKIPPED（理由）>
 - 検証で報告された指摘事項の一覧（あれば）
+- GO 以外はいずれも**非通過**として扱う（呼び出し元のゲート判定に DECISION をそのまま伝える。MANUAL_VERIFY_REQUIRED を「指摘なし」扱いにしない）
 
 Then suggest next steps:
-- If all OK and validation passed: 実装完了。指摘事項があればそのレビューを促す
+- If all OK and validation GO: 実装完了。指摘事項があればそのレビューを促す
+- If MANUAL_VERIFY_REQUIRED: 完了扱いにせず、不足している検証手順（smoke 環境・テストコマンド等）を明示して手動検証を促す
 - If any FAIL/TIMEOUT: Review logs and fix issues manually, then re-run `/kiro:spec-run $1`（tasks.md の未チェックタスクだけが再実行される）
 - 連続失敗ガードで打ち切った場合: 打ち切り理由（直近の失敗ログの要点）を明記する
 - フォールバック発生回数を集計表示（例: `claude -p フォールバック: 2/15 タスク`）。常時フォールバックしている場合は Codex のクォータ確認を促す

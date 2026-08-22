@@ -268,6 +268,7 @@ This validates the dig-refined requirements against the existing codebase (gap a
 - Review the validation output. If it surfaces **critical** gaps or contradictions (requirements that conflict with existing code, missing prerequisites), apply the necessary corrections to `.kiro/specs/{feature-name}/requirements.md` directly — preserve dig decision IDs and AC numbering per the Phase 4 rules.
 - Minor observations: do not edit requirements; carry them into the Final Summary's validation section.
 - **This gate is soft**: if the command is missing in this project, errors out, or reports problems you cannot resolve, record the outcome (including `SKIPPED` if unavailable), note it for the Final Summary, and continue anyway.
+- **Exception — audit violation**: if validate-gap reports an **audit violation** (unauthorized writes outside research.md, baseline tampering, or `APPEND_VIOLATION`), do NOT treat it as soft. The working tree may have been modified or corrupted during validation: **stop the workflow here**, report the violation details, and wait for the user's decision. Never record it as `SKIPPED` and continue to design.
 
 **IMPORTANT**: Ignore any "次のステップ" / "Next Step" guidance in the subagent output. It is for standalone usage.
 
@@ -424,9 +425,10 @@ Usage: /kiro:spec-init-dig "<project description>"
 - If the dig failure is non-fatal (requirements.md exists and is well-formed), still proceed to Phase 5 — validation, design, and tasks are more valuable than a perfect dig
 
 ### Validation Failure (Phase 5 / Phase 7)
-- **Never stop the workflow for a validation failure** — these gates are soft
+- **Do not stop the workflow for an ordinary validation failure** — these gates are soft
 - If `/kiro:validate-gap` or `/kiro:validate-design` is not available in this project, errors out, or times out: record `SKIPPED` with the reason, report it in the Final Summary's Validation Results, and continue to the next phase
 - Unresolved validation warnings go into the Final Summary, not into an abort
+- **Sole exception**: an **audit violation** reported by validate-gap (unauthorized writes outside research.md, baseline tampering, `APPEND_VIOLATION`) stops the workflow — the working tree may be corrupted, so report the violation and wait for the user instead of continuing
 
 ### Design Generation Failure (Phase 6)
 - Stop workflow; requirements.md (with dig decisions) is intact and usable
@@ -441,7 +443,7 @@ Usage: /kiro:spec-init-dig "<project description>"
 ## Execution Rules
 
 - Do **not** stop between phases in normal operation — this is a one-shot command
-- Only stop early on hard errors (missing args, missing templates, generation failures in Phase 2/6/8) — validation failures (Phase 5/7) are always soft
+- Only stop early on hard errors (missing args, missing templates, generation failures in Phase 2/6/8) — validation failures (Phase 5/7) are soft, **except an audit violation from validate-gap** (unauthorized writes / baseline tampering / `APPEND_VIOLATION`), which stops the workflow for user judgment
 - Each validate command (`validate-gap`, `validate-design`) MUST be attempted exactly once per run — never skip silently; a skip must be recorded and reported
 - The only interactive pauses are the `AskUserQuestion` rounds inside the dig interview (Phase 4) — never pause for phase-transition approval
 - Ignore "次のステップ" guidance from sub-commands — those are for standalone usage

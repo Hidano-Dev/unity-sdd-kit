@@ -113,9 +113,12 @@ feature 名 / 解釈したスコープの要約（含む・含まない）/ brow
 
 ### Step 5: Gate D（完了判定）→ Phase 6 → 報告
 
-- spec-run のサマリ（タスク別 OK/FAIL/TIMEOUT、validate-impl の指摘）を受け取る
-- 全タスク OK かつ validate-impl 指摘なし → Gate D 通過。Phase 6（PR 作成）へ進む
-- FAIL/TIMEOUT あり、または validate-impl が重大な指摘 → **自動修正ループには入らず**
+- spec-run のサマリ（タスク別 OK/FAIL/TIMEOUT、validate-impl の DECISION と指摘）を受け取る
+- 全タスク OK かつ validate-impl が **GO** → Gate D 通過。Phase 6（PR 作成）へ進む
+- validate-impl が **MANUAL_VERIFY_REQUIRED** → Gate D **不通過**（重大な指摘の有無にかかわらず、
+  必須検証が実行不能で完了を主張できない状態）。エスカレーションし、不足している検証手順・
+  環境前提を提示して、手動検証するか「現状で受け入れて PR 化する」かをユーザーが決める
+- FAIL/TIMEOUT あり、または validate-impl が **NO-GO**・重大な指摘 → **自動修正ループには入らず**
   エスカレーション（spec-run の無人実行方針を踏襲。修正して再実行するかはユーザーが決める。
   「現状で受け入れて PR 化する」をユーザーが選んだ場合のみ Phase 6 へ進む）
 
@@ -139,6 +142,8 @@ feature 名 / 解釈したスコープの要約（含む・含まない）/ brow
 
 - **ローカル実行が前提**。Phase 5 は `codex exec` と `claude -p` を使う（分担・フォールバック手順は
   `/kiro:spec-run` 側に定義済み。本 Skill はそれを呼ぶだけで再定義しない）
+- Reviewer（`/kiro:validate-gap` / `/kiro:validate-design` / `/kiro:validate-impl`）も codex-first
+  （各コマンド側に定義済み。`codex` 不在・失敗時は Claude サブエージェントに自動フォールバック、確認不要）
 - `codex` 不在時は spec-run 自身が `claude -p` のみのモードに自動降格する（確認不要）
 - `claude` CLI もネスト起動できない環境（クラウド等）では、Gate C までを完走して停止し、
   「ローカルで `/kiro:spec-run <feature>` を実行してください」と報告する（失敗ではなく正常な縮退）

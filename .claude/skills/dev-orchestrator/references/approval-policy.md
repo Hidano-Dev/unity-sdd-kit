@@ -48,6 +48,10 @@ Orchestrator が cc-sdd の各承認ゲートを代行するときの判定基�
 - 個人情報・認証・課金・セキュリティに関わる要件の追加や変更
 - 既存データの削除・移行・スキーマ変更を伴う
 - steering の方針と矛盾し、どちらを優先すべきか判断が必要
+- validate-gap が**監査違反**を報告した — 次のいずれか: 許可された research.md 以外への
+  ファイル変更・削除・commit、ベースライン改ざん、または `APPEND_VIOLATION`（既存 research.md
+  の上書き・切り詰めによる破損）。作業ツリー・research.md の扱いをユーザーが判断するまで
+  次フェーズへ進まない
 
 ## Gate B: 設計承認（design → tasks）
 
@@ -100,14 +104,18 @@ Orchestrator が cc-sdd の各承認ゲートを代行するときの判定基�
 
 **完了報告（確認不要の通知）**:
 
-- spec-run の全タスクが OK かつ validate-impl に重大指摘なし
+- spec-run の全タスクが OK かつ validate-impl の DECISION が明示的な `GO`
+  （`MANUAL_VERIFY_REQUIRED` や `SKIPPED` を「重大指摘なし」として GO 扱いしない）
 - validate-impl の軽微な指摘は完了報告に「残課題」として転記する
 
 **エスカレーション必須条件**:
 
 - FAIL / TIMEOUT のタスクがある（部分成功を含む）
 - 連続失敗ガードで打ち切られた
-- validate-impl が要件未達・回帰・セキュリティ問題など重大な指摘を報告した
+- validate-impl が `NO-GO`、または要件未達・回帰・セキュリティ問題など重大な指摘を報告した
+- validate-impl が `MANUAL_VERIFY_REQUIRED` を返した（重大指摘の有無を問わず必須検証が
+  実行不能で完了を主張できない状態。不足している検証手順・環境前提を提示して、
+  手動検証するか「現状で受け入れて PR 化する」かをユーザーが決める）
 
 エスカレーション時は「修正して再実行 / 現状で受け入れて PR 化 / 中断」を選択肢として提示する。
 **Orchestrator 自身が検証起点の修正ループに入ってはならない**（spec-run の無人実行方針と同じ）。
