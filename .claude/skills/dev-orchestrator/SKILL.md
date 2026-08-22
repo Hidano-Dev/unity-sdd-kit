@@ -139,6 +139,8 @@ feature 名 / 解釈したスコープの要約（含む・含まない）/ brow
 
 - **ローカル実行が前提**。Phase 5 は `codex exec` と `claude -p` を使う（分担・フォールバック手順は
   `/kiro:spec-run` 側に定義済み。本 Skill はそれを呼ぶだけで再定義しない）
+- Reviewer（`/kiro:validate-gap` / `/kiro:validate-design` / `/kiro:validate-impl`）も codex-first
+  （各コマンド側に定義済み。`codex` 不在・失敗時は Claude サブエージェントに自動フォールバック、確認不要）
 - `codex` 不在時は spec-run 自身が `claude -p` のみのモードに自動降格する（確認不要）
 - `claude` CLI もネスト起動できない環境（クラウド等）では、Gate C までを完走して停止し、
   「ローカルで `/kiro:spec-run <feature>` を実行してください」と報告する（失敗ではなく正常な縮退）
