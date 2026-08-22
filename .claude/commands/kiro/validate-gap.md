@@ -36,7 +36,7 @@ VAL_TMP=$(mktemp -d)
 trap 'rm -rf "$VAL_TMP"' ERR
 GIT_COMMON=$(git rev-parse --git-common-dir)
 RESEARCH=".kiro/specs/$1/research.md"
-if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-before.txt"; else echo "ABSENT" > "$VAL_TMP/research-before.txt"; fi
+if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-before.txt"; cp -- "$RESEARCH" "$VAL_TMP/research-content-before"; else echo "ABSENT" > "$VAL_TMP/research-before.txt"; fi
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-before.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
@@ -89,6 +89,17 @@ git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH"
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
 echo "RESEARCH_DIFF_START"
 diff "$VAL_TMP/research-before.txt" "$VAL_TMP/research-after.txt"
+echo "RESEARCH_APPEND_CHECK_START"
+if [ -f "$VAL_TMP/research-content-before" ]; then
+  if [ -f "$RESEARCH" ] && head -c "$(wc -c < "$VAL_TMP/research-content-before")" "$RESEARCH" | cmp -s -- - "$VAL_TMP/research-content-before"; then
+    echo "APPEND_OK"
+  else
+    echo "APPEND_VIOLATION"
+  fi
+else
+  echo "NO_PRIOR_CONTENT"
+fi
+echo "RESEARCH_APPEND_CHECK_END"
 echo "HEAD_DIFF_START"
 diff "$VAL_TMP/head-before.txt" "$VAL_TMP/head-after.txt"
 echo "TREE_DIFF_START"
@@ -132,6 +143,7 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
 判定は Bash tool の終了コードではなく、**出力末尾の `CODEX_EXIT=` マーカー**で行う（`tee` と代入により Bash 呼び出し自体は成功扱いになるため）。
 
 - **`CODEX_EXIT=0`** → codex の出力を検証レポートとして扱う。research.md の更新は Read だけでは「更新された」と「以前から存在するだけ」を区別できないため、**呼び出し C の `RESEARCH_DIFF` が空でない**（= 実際に作成・追記が発生した）ことを必ず確認する。`RESEARCH_DIFF` が空なら canonical skill の保存契約が果たされていないので失敗扱いで Step 3 へ。内容の妥当性確認には Read を使う。
+- **append-only 検証**: `RESEARCH_APPEND_CHECK` が `APPEND_VIOLATION` の場合（= 既存の research.md の内容が結果の先頭に保持されていない = 上書き・切り詰め・削除が発生した）は、canonical skill の「既存内容へ追記し、上書きしない」契約への違反であり、既存の gap 分析が破損した可能性がある。**監査違反と同じ終端の非通過**として扱い、フォールバックで追記して完了扱いにせず、破損内容の報告とともにユーザーの判断を仰ぐ（`git diff` / 履歴からの復元可否も添える）。
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
