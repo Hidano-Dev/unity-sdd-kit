@@ -1,12 +1,13 @@
 ---
 description: Analyze implementation gap between requirements and existing codebase (codex-first, Claude subagent fallback)
-allowed-tools: Read, Bash, Task
+allowed-tools: Read, Bash, Write, Task
 argument-hint: <feature-name>
 ---
 
 # Implementation Gap Validation
 
 Gap 分析を **codex exec を第一優先**で実行し、Codex が利用不可・実行失敗の場合のみ Claude サブエージェント（validate-gap-agent）にフォールバックする。
+どちらの経路でも、canonical skill（`.agents/skills/kiro-validate-gap/SKILL.md`）の契約どおり分析結果を `.kiro/specs/$1/research.md` に永続化する。
 
 ## Parse Arguments
 - Feature name: `$1`
@@ -24,16 +25,19 @@ Codex の存在確認:
 
 ## Step 1: codex exec で実行（codex 利用可の場合のみ）
 
+以下を **1 回の Bash 呼び出し**で実行する（`codex_exit` はシェルをまたいで持ち越せないため、同一シェル内で `CODEX_EXIT=` マーカーとして出力に残す）:
+
 ```bash
-codex exec --sandbox read-only - <<'CODEX_EOF' 2>&1 | tee /tmp/codex-validate-gap-output.log
+codex exec --sandbox workspace-write - <<'CODEX_EOF' 2>&1 | tee /tmp/codex-validate-gap-output.log
 <codex_prompt>
 CODEX_EOF
 codex_exit=${PIPESTATUS[0]}
+echo "CODEX_EXIT=$codex_exit"
 ```
 
 > **Note:**
 > - prompt は heredoc 経由で stdin に渡す（クォート/エスケープ事故回避）。`-` 引数で stdin から読み取らせる。
-> - Gap 分析は読み取り専用のため `--sandbox read-only` で実行する（ファイル変更は許可しない）。
+> - canonical skill が `.kiro/specs/$1/research.md` への保存を要求するため `--sandbox workspace-write` で実行し、書き込み対象は prompt 側で research.md のみに制限する。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。
 > - Bash tool の timeout パラメータで 15 分（900 秒）のタイムアウトを設定する。
 > - 出力を `tee` でログファイルに保存し、失敗時の理由確認に使う。
@@ -41,13 +45,15 @@ codex_exit=${PIPESTATUS[0]}
 `<codex_prompt>` は以下（`$1` は実際の feature 名に置換する）:
 
 ```
-You are performing a read-only implementation gap analysis for the feature "$1". Read the following files: .kiro/specs/$1/spec.json, .kiro/specs/$1/requirements.md, all files under .kiro/steering/, and .kiro/settings/rules/gap-analysis.md. Follow the analysis framework in gap-analysis.md: investigate the existing codebase for reusable patterns, components, and integration points; identify missing capabilities and integration challenges; and evaluate multiple implementation approaches (extend / new / hybrid) with trade-offs. Provide analysis and options, not final implementation decisions, and explicitly flag areas needing further research. Do NOT modify any files. Write the report in the language specified in spec.json (field: language; default to English if missing). Structure the report with Markdown headings: (1) Analysis Summary (3-5 bullets, under 300 words), (2) detailed analysis following the output guidelines in gap-analysis.md, (3) Next Steps for the design phase. Output the full report to stdout and complete the session without waiting for user input.
+You are running the canonical gap-analysis skill for the feature "$1". Read and follow .agents/skills/kiro-validate-gap/SKILL.md (analysis framework: .agents/skills/kiro-validate-gap/rules/gap-analysis.md), including its Step 5: save the gap analysis to .kiro/specs/$1/research.md (if the file already exists, append the new analysis separated by a horizontal rule ---, do not overwrite) and read it back to verify. File-write policy: the ONLY file you may create or modify is .kiro/specs/$1/research.md — do not modify any other file and do not commit. Write in the language specified in .kiro/specs/$1/spec.json (field: language; default to English if missing). Output to stdout: (1) Analysis Summary (3-5 bullets, under 300 words), (2) Document Status confirming research.md was written and verified, (3) Next Steps for the design phase. Complete the session without waiting for user input.
 ```
 
 ## Step 2: 結果判定
 
-- **codex_exit が 0** → codex の出力をそのまま検証レポートとして扱い、Display Result へ進む。
-- **codex_exit が非ゼロ、またはタイムアウト** → ログ末尾から失敗理由（使用制限・エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
+判定は Bash tool の終了コードではなく、**出力末尾の `CODEX_EXIT=` マーカー**で行う（`tee` と代入により Bash 呼び出し自体は成功扱いになるため）。
+
+- **`CODEX_EXIT=0`** → codex の出力を検証レポートとして扱う。`.kiro/specs/$1/research.md` が作成・更新されていることを Read で確認したうえで Display Result へ進む（更新されていなければ失敗扱いで Step 3 へ）。
+- **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
 
 ## Step 3: Claude サブエージェントへフォールバック
@@ -73,9 +79,13 @@ File patterns to read:
 )
 ```
 
+サブエージェント完了後、canonical skill の契約に合わせて分析結果を永続化する:
+- 返却された分析を `.kiro/specs/$1/research.md` に保存する（既存なら `---` 区切りで追記、上書きしない）
+- 保存後に Read で読み戻して確認する
+
 ## Display Result
 
-使用したエンジン（codex / claude-subagent-fallback、フォールバック時はその理由）を明記したうえで、検証レポートの要約を表示し、次のステップを案内する:
+使用したエンジン（codex / claude-subagent-fallback、フォールバック時はその理由）と `research.md` の保存結果を明記したうえで、検証レポートの要約を表示し、次のステップを案内する:
 
 ### Next Phase: Design Generation
 
