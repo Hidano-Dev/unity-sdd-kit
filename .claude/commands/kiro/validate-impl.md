@@ -42,6 +42,7 @@ sandbox bypass の確認として、実行前後の作業ツリーを**状態と
 ### 呼び出し A: ベースライン記録（短時間、タイムアウト対象外）
 
 ```bash
+set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
@@ -49,10 +50,15 @@ git status --porcelain > "$VAL_TMP/tree-before.txt"
 git diff HEAD > "$VAL_TMP/content-before.patch"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
-  | grep -zEv '^(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' \
+  | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-before.txt"
 echo "VAL_TMP=$VAL_TMP"
+echo "BASELINE_HASHES_START"
+sha256sum -- "$VAL_TMP"/*-before*
+echo "BASELINE_OK"
 ```
+
+呼び出し A の出力に `BASELINE_OK` が**無い**（いずれかのコマンドが失敗した）場合は、**codex を起動せず** Step 3 のフォールバックへ直行する（ベースラインが不完全なまま unrestricted 実行すると、after 側も同様に失敗する環境で監査が clean と誤判定されるため）。
 
 ### 呼び出し B: codex 実行（timeout 1800 秒）
 
@@ -68,12 +74,15 @@ echo "CODEX_EXIT=$codex_exit"
 ### 呼び出し C: 作業ツリー監査（呼び出し B の成功・失敗・**タイムアウトを問わず必ず実行**）
 
 ```bash
+echo "BASELINE_VERIFY_START"
+sha256sum -- "$VAL_TMP"/*-before*
+echo "BASELINE_VERIFY_END"
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain > "$VAL_TMP/tree-after.txt"
 git diff HEAD > "$VAL_TMP/content-after.patch"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
-  | grep -zEv '^(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' \
+  | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
 echo "HEAD_DIFF_START"
 diff "$VAL_TMP/head-before.txt" "$VAL_TMP/head-after.txt"
@@ -95,6 +104,8 @@ echo "AUDIT_END"
 > - **ignored ファイルも監査対象**に含める（`.env` やローカル設定などは `git status` / `git diff` に現れないため）。ただしビルド生成物ディレクトリ（Library, Temp, obj, node_modules 等）は test/build/smoke の**意図された副作用**のため除外する。プロジェクト固有の生成物ディレクトリがあれば除外パターンに適宜追加してよいが、設定ファイル類を除外してはならない。
 > - **HEAD の移動も監査対象**に含める（codex が変更を commit してしまうと status / diff / ハッシュ列挙はすべて clean に戻るため、HEAD の OID 比較でのみ検出できる）。
 > - `sha256sum` の引数は `--` でオプション解析を終了させる（`--help` のような名前の未追跡ファイルがあると、ハッシュの代わりに固定のヘルプ文が出力され before/after 比較が無効化されるため）。
+> - 生成物除外の正規表現は `(^|/)` で**ネストした生成物ディレクトリ**（monorepo の `packages/app/node_modules/` 等）にも一致させる。リポジトリ直下しか除外しないと、依存物・成果物を全ハッシュして監査が極端に遅くなる。
+> - **ベースラインの改ざん検知**: codex は同一 OS ユーザーの unrestricted プロセスとして動くため、一時ディレクトリを探索して `*-before` ファイルを書き換え、監査を空振りさせることが理論上可能。対策として呼び出し A が `BASELINE_HASHES` としてベースラインファイル自体のハッシュを**会話ログ（codex から到達不能な信頼記録）**に残し、呼び出し C の冒頭で `BASELINE_VERIFY` として再計算する。両者は**呼び出し A の出力と突き合わせて**一致を確認する。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。
 > - 一時ファイルは `umask 077` + `mktemp -d`（モード 0700 のプライベートディレクトリ）配下に保存する。codex の出力や diff には secrets grep の検出値などの機密情報が含まれ得るため、共有マシンの他ユーザーから読める固定の `/tmp` パスには置かない。
 
@@ -112,6 +123,7 @@ You are running the canonical integration validation skill for the feature "{fea
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
+- **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。**1 行でも不一致・欠落があればベースライン改ざんとみなし**、監査結果全体を信用せず、最終判定を `NO-GO` として「検証中にベースラインファイルが書き換えられた」旨をエスカレーションする（改ざん自体が重大インシデントであり、フォールバック再実行で握りつぶさない）。
 - **作業ツリー監査**: 呼び出し C の `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= codex 実行によって新たに変更・commit が生じた、既存 dirty ファイルや ignored ファイルの内容がさらに書き換えられた場合）は、その内容を「検証中の想定外の変更」として報告する。ユーザーの指示なく破棄・コミットしない。実行前から存在した dirty（before に含まれる分）は想定外扱いにしない。
 - **監査差分は最終判定に反映する**: 監査が非 clean の場合、codex レポートの DECISION が `GO` でも**最終判定を `MANUAL_VERIFY_REQUIRED` に降格**する（変更内容が要件・設計への実害や機密設定の破損を示すなら `NO-GO`）。降格後の判定を Display Result と呼び出し元（spec-run / Gate D）へ伝播させ、`GO` のまま通過させない。
 - 判定・監査・失敗理由の取得が済んだら一時ディレクトリを削除する（機密情報を含み得るログ・diff を残さない）。削除対象は**呼び出し A の出力で得たパスに限る** — 呼び出し B のログに現れるパス文字列は非信頼のため使わず、削除前にパスが呼び出し A の値と一致し `mktemp -d` の生成形式（一時ディレクトリ配下）であることを確認する。

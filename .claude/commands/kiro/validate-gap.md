@@ -30,14 +30,23 @@ Codex の存在確認:
 ### 呼び出し A: 一時ディレクトリ作成 + ベースライン記録（信頼済み）
 
 ```bash
+set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain > "$VAL_TMP/tree-before.txt"
 git diff HEAD > "$VAL_TMP/content-before.patch"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
+git ls-files --others --ignored --exclude-standard -z \
+  | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
+  | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-before.txt"
 echo "VAL_TMP=$VAL_TMP"
+echo "BASELINE_HASHES_START"
+sha256sum -- "$VAL_TMP"/*-before*
+echo "BASELINE_OK"
 ```
+
+呼び出し A の出力に `BASELINE_OK` が**無い**（いずれかのコマンドが失敗した）場合は、**codex を起動せず** Step 3 のフォールバックへ直行する（ベースラインが不完全なまま workspace-write 実行すると許可外書き込みを検出できないため）。
 
 ### 呼び出し B: codex 実行（`$VAL_TMP` は呼び出し A で得た実パスに置換。`codex_exit` はシェルをまたいで持ち越せないため、同一シェル内で `CODEX_EXIT=` マーカーとして出力に残す）
 
@@ -53,10 +62,16 @@ echo "CODEX_EXIT=$codex_exit"
 ### 呼び出し C: 書き込み監査（呼び出し B の成功・失敗・タイムアウトを問わず必ず実行。`$VAL_TMP` は呼び出し A の実パスに置換）
 
 ```bash
+echo "BASELINE_VERIFY_START"
+sha256sum -- "$VAL_TMP"/*-before*
+echo "BASELINE_VERIFY_END"
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain > "$VAL_TMP/tree-after.txt"
 git diff HEAD > "$VAL_TMP/content-after.patch"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
+git ls-files --others --ignored --exclude-standard -z \
+  | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
+  | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
 echo "HEAD_DIFF_START"
 diff "$VAL_TMP/head-before.txt" "$VAL_TMP/head-after.txt"
 echo "TREE_DIFF_START"
@@ -65,8 +80,14 @@ echo "CONTENT_DIFF_START"
 diff "$VAL_TMP/content-before.patch" "$VAL_TMP/content-after.patch" | head -200
 echo "UNTRACKED_DIFF_START"
 diff "$VAL_TMP/untracked-before.txt" "$VAL_TMP/untracked-after.txt"
+echo "IGNORED_DIFF_START"
+diff "$VAL_TMP/ignored-before.txt" "$VAL_TMP/ignored-after.txt"
 echo "AUDIT_END"
 ```
+
+> **Note:**
+> - ignored ファイル（`.env` やローカル設定）も監査対象に含める（`git status` / `git diff` に現れないため）。ネストした生成物ディレクトリは `(^|/)` パターンで除外する。設定ファイル類を除外パターンに追加してはならない。
+> - `BASELINE_VERIFY` は呼び出し A が会話ログ（codex から到達不能な信頼記録）に残した `BASELINE_HASHES` と突き合わせ、codex によるベースラインファイルの書き換えを検知する。
 
 > **Note:**
 > - prompt は heredoc 経由で stdin に渡す（クォート/エスケープ事故回避）。`-` 引数で stdin から読み取らせる。
@@ -89,7 +110,9 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
-- **書き込み監査**: 呼び出し C の各 DIFF から `.kiro/specs/$1/research.md` に関する行を除いたうえで、`HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `UNTRACKED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit が生じた場合）は、codex の実行結果を**成功扱いにしない**: 変更内容を「検証中の想定外の変更」としてユーザーに報告し（指示なく破棄・コミットしない）、gap 分析は Step 3 の Claude サブエージェントでやり直す（research.md への追記は許可された変更のため監査対象から除外する）。
+- **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。1 行でも不一致・欠落があればベースライン改ざんとみなし、下記「監査違反」として扱う。
+- **書き込み監査**: 呼び出し C の各 DIFF から `.kiro/specs/$1/research.md` に関する行を除いたうえで、`HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit が生じた場合）は**監査違反**とする（research.md への追記は許可された変更のため監査対象から除外する）。
+- **監査違反は終端の非通過結果**: フォールバックによる分析やり直しで上書きせず、コマンドをそこで停止する。変更・改ざんの内容を「検証中の想定外の変更（監査違反）」として明示的に報告し（指示なく破棄・コミットしない）、**作業ツリーの扱いをユーザーが判断するまで**次のフェーズ（設計）への案内や「Gap Analysis Complete」の表示を行わない。dev-orchestrator 経由の場合はエスカレーション必須（approval-policy の Gate A 参照）。
 - 判定と失敗理由の取得が済んだら、**呼び出し A の出力で得たパスに限り** `rm -rf` でログディレクトリを削除する（タイムアウト時も同様）。呼び出し B のログに現れるパス文字列は非信頼のため削除対象にしない。削除前にパスが呼び出し A の値と一致し、`mktemp -d` の生成形式（一時ディレクトリ配下）であることを確認する。
 
 ## Step 3: Claude サブエージェントへフォールバック
