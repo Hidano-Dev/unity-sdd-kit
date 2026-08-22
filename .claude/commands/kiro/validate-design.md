@@ -28,7 +28,10 @@ Codex の存在確認:
 以下を **1 回の Bash 呼び出し**で実行する（`codex_exit` はシェルをまたいで持ち越せないため、同一シェル内で `CODEX_EXIT=` マーカーとして出力に残す）:
 
 ```bash
-codex exec --sandbox read-only - <<'CODEX_EOF' 2>&1 | tee /tmp/codex-validate-design-output.log
+umask 077
+VAL_TMP=$(mktemp -d)
+echo "VAL_TMP=$VAL_TMP"
+codex exec --sandbox read-only - <<'CODEX_EOF' 2>&1 | tee "$VAL_TMP/codex-output.log"
 <codex_prompt>
 CODEX_EOF
 codex_exit=${PIPESTATUS[0]}
@@ -40,7 +43,7 @@ echo "CODEX_EXIT=$codex_exit"
 > - 設計レビューは読み取り専用（canonical skill にファイル書き込みは無い）ため `--sandbox read-only` で実行する。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。
 > - Bash tool の timeout パラメータで 15 分（900 秒）のタイムアウトを設定する。
-> - 出力を `tee` でログファイルに保存し、失敗時の理由確認に使う。
+> - ログは `umask 077` + `mktemp -d`（モード 0700 のプライベートディレクトリ）配下に保存する。codex の出力にはコードベース由来の非公開情報が含まれ得るため、共有マシンの他ユーザーから読める固定の `/tmp` パスには置かない。
 
 `<codex_prompt>` は以下（`$1` は実際の feature 名に置換する）:
 
@@ -55,6 +58,7 @@ You are running the canonical design review skill for the feature "$1". Read and
 - **`CODEX_EXIT=0`** → codex の出力をそのまま検証レポートとして扱い、Display Result へ進む（GO/NO-GO はレポート内容であり、失敗ではない）。
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
+- 判定と失敗理由の取得が済んだら、`VAL_TMP=` マーカーの実パスを使って `rm -rf "$VAL_TMP"` でログディレクトリを削除する（タイムアウト時も出力済みの `VAL_TMP=` があれば削除する）。
 
 ## Step 3: Claude サブエージェントへフォールバック
 

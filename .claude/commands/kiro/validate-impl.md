@@ -37,28 +37,51 @@ Codex の存在確認:
 
 ## Step 1: codex exec で実行（codex 利用可の場合のみ）
 
-以下を **1 回の Bash 呼び出し**で実行する（`codex_exit` はシェルをまたいで持ち越せないため、同一シェル内で `CODEX_EXIT=` マーカーとして出力に残す）。sandbox bypass の確認として、実行前後の作業ツリー状態を記録して比較する:
+sandbox bypass の確認として、実行前後の作業ツリーを**状態と内容の両方**で監査する。タイムアウトで後処理が飛ばないよう、**3 回の独立した Bash 呼び出し**に分ける（呼び出し B がタイムアウトしても A のベースラインは残り、C の監査は必ず実行できる）。呼び出し B・C 内の `$VAL_TMP` は、呼び出し A が出力した `VAL_TMP=` の実パスに置換する。
+
+### 呼び出し A: ベースライン記録（短時間、タイムアウト対象外）
 
 ```bash
-git status --porcelain > /tmp/validate-impl-tree-before.txt
-codex exec --dangerously-bypass-approvals-and-sandbox - <<'CODEX_EOF' 2>&1 | tee /tmp/codex-validate-impl-output.log
+umask 077
+VAL_TMP=$(mktemp -d)
+git status --porcelain > "$VAL_TMP/tree-before.txt"
+git diff HEAD > "$VAL_TMP/content-before.patch"
+git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum > "$VAL_TMP/untracked-before.txt"
+echo "VAL_TMP=$VAL_TMP"
+```
+
+### 呼び出し B: codex 実行（timeout 1800 秒）
+
+```bash
+umask 077
+codex exec --dangerously-bypass-approvals-and-sandbox - <<'CODEX_EOF' 2>&1 | tee "$VAL_TMP/codex-output.log"
 <codex_prompt>
 CODEX_EOF
 codex_exit=${PIPESTATUS[0]}
-git status --porcelain > /tmp/validate-impl-tree-after.txt
 echo "CODEX_EXIT=$codex_exit"
+```
+
+### 呼び出し C: 作業ツリー監査（呼び出し B の成功・失敗・**タイムアウトを問わず必ず実行**）
+
+```bash
+git status --porcelain > "$VAL_TMP/tree-after.txt"
+git diff HEAD > "$VAL_TMP/content-after.patch"
+git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum > "$VAL_TMP/untracked-after.txt"
 echo "TREE_DIFF_START"
-diff /tmp/validate-impl-tree-before.txt /tmp/validate-impl-tree-after.txt
-echo "TREE_DIFF_END"
+diff "$VAL_TMP/tree-before.txt" "$VAL_TMP/tree-after.txt"
+echo "CONTENT_DIFF_START"
+diff "$VAL_TMP/content-before.patch" "$VAL_TMP/content-after.patch" | head -200
+echo "UNTRACKED_DIFF_START"
+diff "$VAL_TMP/untracked-before.txt" "$VAL_TMP/untracked-after.txt"
+echo "AUDIT_END"
 ```
 
 > **Note:**
 > - prompt は heredoc 経由で stdin に渡す（クォート/エスケープ事故回避）。`-` 引数で stdin から読み取らせる。
 > - `--dangerously-bypass-approvals-and-sandbox` はテストランナー（UnityTestRunner 等の workspace 外プロセス）や build/smoke コマンドの起動を許可するため。ファイルを変更しないことはプロンプト側で明示的に禁止する。
-> - 作業ツリーは実行**前後の差分**で監査する。`/kiro:spec-impl` 直後など実行前から dirty なケースがあるため、実行後の `git status` 単体では判定しない。
+> - 監査は `git status --porcelain` の状態ラベルだけでなく、`git diff HEAD` の内容と未追跡ファイルのハッシュも比較する。実行前から ` M` / `??` だったファイルの**内容がさらに書き換えられた**ケースは状態ラベル比較では検出できないため。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。
-> - Bash tool の timeout パラメータで 30 分（1800 秒）のタイムアウトを設定する（テストスイート・smoke 実行を含むため）。
-> - 出力を `tee` でログファイルに保存し、失敗時の理由確認に使う。
+> - 一時ファイルは `umask 077` + `mktemp -d`（モード 0700 のプライベートディレクトリ）配下に保存する。codex の出力や diff には secrets grep の検出値などの機密情報が含まれ得るため、共有マシンの他ユーザーから読める固定の `/tmp` パスには置かない。
 
 `<codex_prompt>` は以下（`{feature}` / `{tasks}` は Auto-Detection の結果に置換する。feature ごとに 1 回実行）:
 
@@ -73,7 +96,9 @@ You are running the canonical integration validation skill for the feature "{fea
 - **`CODEX_EXIT=0`** → codex の出力をそのまま検証レポートとして扱い、Display Result へ進む（NO-GO / MANUAL_VERIFY_REQUIRED はレポート内容であり、実行失敗ではない）。
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
-- **作業ツリー監査**: `TREE_DIFF_START`〜`TREE_DIFF_END` が空でない場合（= codex 実行によって新たに変更が生じた場合）は、その内容を「検証中の想定外の変更」として報告する。ユーザーの指示なく破棄・コミットしない。実行前から存在した dirty（before に含まれる分）は想定外扱いにしない。
+  - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
+- **作業ツリー監査**: 呼び出し C の `TREE_DIFF` / `CONTENT_DIFF` / `UNTRACKED_DIFF` のいずれかが空でない場合（= codex 実行によって新たに変更が生じた、または既存 dirty ファイルの内容がさらに書き換えられた場合）は、その内容を「検証中の想定外の変更」として報告する。ユーザーの指示なく破棄・コミットしない。実行前から存在した dirty（before に含まれる分）は想定外扱いにしない。
+- 判定・監査・失敗理由の取得が済んだら `rm -rf "$VAL_TMP"` で一時ディレクトリを削除する（機密情報を含み得るログ・diff を残さない）。
 
 ## Step 3: Claude サブエージェントへフォールバック
 
