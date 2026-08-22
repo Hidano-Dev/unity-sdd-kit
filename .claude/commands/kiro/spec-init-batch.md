@@ -84,6 +84,7 @@ TodoWrite を対象 Spec 1 件につき 1 タスクで初期化する:
 - **成功**(tasks.md まで生成された): プランドキュメントを更新 — 当該節の Status を `DONE`、`Feature dir:` に `.kiro/specs/{feature-name}/` を記入、「Spec 一覧」テーブルも `DONE` に。TodoWrite を `completed` へ
 - **失敗**: Status を `FAILED` にし、当該節に `- Failure: {理由の要約}` を追記。TodoWrite はそのタスクを failed 扱いにし、**次の Spec へ自動継続**する
 - ただし **2 Spec 連続で FAILED** した場合は環境・前提の問題の可能性が高いため打ち切り、残りを `SKIPPED` として記録してサマリーへ進む
+- **例外 — 監査違反**: spec-init-dig が validate-gap の**監査違反**（research.md 以外への許可外書き込み・ベースライン改ざん・`APPEND_VIOLATION`）で停止した場合は、通常の FAILED として次の Spec へ進んではならない。作業ツリーが変更・破損された可能性があるため、**バッチ全体をそこで停止**し、Status を `FAILED (audit violation)` と記録して違反内容を報告し、ユーザーの判断を待つ
 
 ### Step 5: Continue
 

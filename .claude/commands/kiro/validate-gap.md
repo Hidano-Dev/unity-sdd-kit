@@ -41,13 +41,13 @@ git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-before.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
 git ls-files -v > "$VAL_TMP/indexflags-before.txt"
-git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -e "$f" ] || [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
-git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-before.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-before.txt"
 echo "VAL_TMP=$VAL_TMP"
 echo "BASELINE_HASHES_START"
 sha256sum -- "$VAL_TMP"/*-before*
@@ -80,13 +80,13 @@ git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-after.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-after.patch"
 git ls-files -v > "$VAL_TMP/indexflags-after.txt"
-git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -e "$f" ] || [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
-git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-after.txt"
 echo "RESEARCH_DIFF_START"
 diff "$VAL_TMP/research-before.txt" "$VAL_TMP/research-after.txt"
 echo "RESEARCH_APPEND_CHECK_START"
@@ -147,6 +147,7 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
 - **`CODEX_EXIT=` が非ゼロ、マーカー欠落、またはタイムアウト** → ログ末尾から失敗理由（使用制限・認証エラー等）を一言で記録し、Step 3 のフォールバックへ進む。
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
+  - **例外 — 失敗 run が research.md に書き込んでいた場合**: 失敗した run で `RESEARCH_DIFF` が空でない（= 途中まで追記して落ちた）場合は、`APPEND_OK` でも**フォールバックしない**。不完全な断片の後ろに正常な分析を追記すると破損した research.md が「完了」として設計へ渡るため、監査違反と同じ終端の非通過として扱い、追記された断片の内容と復元手段（`git diff` / 断片の手動削除）を報告してユーザーの判断を仰ぐ。
 - **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。1 行でも不一致・欠落があればベースライン改ざんとみなし、下記「監査違反」として扱う。
 - **書き込み監査**: 許可された `.kiro/specs/$1/research.md` は呼び出し A・C の双方で**ファイル単位**（git pathspec の `:(exclude)` とハッシュ列挙のスキップ）でベースライン・監査から除外済みのため、各 DIFF に対する行フィルタは不要（patch の hunk・本文行にはパスが含まれず、行フィルタでは許可された追記が誤検知されるため、行単位で除外しようとしてはならない）。そのうえで `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit・index フラグ操作・Git メタデータ変更が生じた場合）は**監査違反**とする。research.md 自体の作成・更新は監査ではなく `CODEX_EXIT=0` 判定内の Read 確認で検証する。
 - **監査違反は終端の非通過結果**: フォールバックによる分析やり直しで上書きせず、コマンドをそこで停止する。変更・改ざんの内容を「検証中の想定外の変更（監査違反）」として明示的に報告し（指示なく破棄・コミットしない）、**作業ツリーの扱いをユーザーが判断するまで**次のフェーズ（設計）への案内や「Gap Analysis Complete」の表示を行わない。dev-orchestrator 経由の場合はエスカレーション必須（approval-policy の Gate A 参照）。
