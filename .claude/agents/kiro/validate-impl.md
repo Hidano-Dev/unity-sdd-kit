@@ -100,6 +100,12 @@ For each task, verify:
 - Use Grep/Glob to confirm file structure matches design
 - If misalignment found, flag as "Design deviation"
 
+#### Cross-Task Integration
+- Identify where tasks share interfaces, data models, or API contracts
+- Verify that one task's output format matches the next task's expected input; check for conflicting assumptions between tasks (naming conventions, error codes, data shapes)
+- Verify shared state (database schemas, config, environment) is consistent across tasks
+- If contracts or shared state are inconsistent, flag as "Cross-task integration issue" (blocks GO)
+
 #### Boundary Audit
 - Compare completed work against design.md's Boundary Commitments / Out of Boundary / Allowed Dependencies / Revalidation Triggers (when present)
 - Flag cross-task spillover where one area absorbed another boundary's responsibility, and hidden dependencies not declared in the design
@@ -129,7 +135,7 @@ Provide summary in the language specified in spec.json:
 - Coverage report (tasks, requirements, design)
 - Issues and deviations with severity (Critical/Warning)
 - DECISION: GO | NO-GO | MANUAL_VERIFY_REQUIRED
-  - `GO` only when all mandatory checks (full tests, smoke boot, secrets grep clean, coverage, design alignment, boundary audit, no unresolved `_Blocked:_` tasks) actually ran and passed
+  - `GO` only when all mandatory checks (full tests, smoke boot, secrets grep clean, coverage, design alignment, cross-task integration consistency, boundary audit, no unresolved `_Blocked:_` tasks) actually ran and passed
   - Before returning `GO`, apply the `kiro-verify-completion` protocol (`.agents/skills/kiro-verify-completion/SKILL.md`) to the feature-level claim with fresh evidence — tests alone are insufficient
   - `NO-GO` for concrete failures (including Critical hardcoded-secrets findings)
   - `MANUAL_VERIFY_REQUIRED` when a mandatory validation could not be identified or executed — name the exact missing step or environment prerequisite. Never collapse this state into GO

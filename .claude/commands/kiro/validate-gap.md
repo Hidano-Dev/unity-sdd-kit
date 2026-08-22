@@ -43,7 +43,8 @@ git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
 { git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then stat -c '%N %F %a' -- "$HOOKS_DIR"; find -H "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find -H "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
+{ git submodule status --recursive; git submodule foreach --recursive --quiet 'echo "== $displaypath"; git rev-parse HEAD; git status --porcelain; git diff HEAD | sha256sum'; } > "$VAL_TMP/submodules-before.txt"
 git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -82,7 +83,8 @@ git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-after.patch"
 { git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
-{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
+{ git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then stat -c '%N %F %a' -- "$HOOKS_DIR"; find -H "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find -H "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
+{ git submodule status --recursive; git submodule foreach --recursive --quiet 'echo "== $displaypath"; git rev-parse HEAD; git status --porcelain; git diff HEAD | sha256sum'; } > "$VAL_TMP/submodules-after.txt"
 git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -112,6 +114,8 @@ echo "INDEXFLAGS_DIFF_START"
 diff "$VAL_TMP/indexflags-before.txt" "$VAL_TMP/indexflags-after.txt"
 echo "GITMETA_DIFF_START"
 diff "$VAL_TMP/gitmeta-before.txt" "$VAL_TMP/gitmeta-after.txt"
+echo "SUBMODULES_DIFF_START"
+diff "$VAL_TMP/submodules-before.txt" "$VAL_TMP/submodules-after.txt"
 echo "UNTRACKED_DIFF_START"
 diff "$VAL_TMP/untracked-before.txt" "$VAL_TMP/untracked-after.txt"
 echo "IGNORED_DIFF_START"
@@ -149,7 +153,7 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
   - **例外 — 失敗 run が research.md に書き込んでいた場合**: 失敗した run で `RESEARCH_DIFF` が空でない（= 途中まで追記して落ちた）場合は、`APPEND_OK` でも**フォールバックしない**。不完全な断片の後ろに正常な分析を追記すると破損した research.md が「完了」として設計へ渡るため、監査違反と同じ終端の非通過として扱い、追記された断片の内容と復元手段（`git diff` / 断片の手動削除）を報告してユーザーの判断を仰ぐ。
 - **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。1 行でも不一致・欠落があればベースライン改ざんとみなし、下記「監査違反」として扱う。
-- **書き込み監査**: 許可された `.kiro/specs/$1/research.md` は呼び出し A・C の双方で**ファイル単位**（git pathspec の `:(exclude)` とハッシュ列挙のスキップ）でベースライン・監査から除外済みのため、各 DIFF に対する行フィルタは不要（patch の hunk・本文行にはパスが含まれず、行フィルタでは許可された追記が誤検知されるため、行単位で除外しようとしてはならない）。そのうえで `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit・index フラグ操作・Git メタデータ変更が生じた場合）は**監査違反**とする。research.md 自体の作成・更新は監査ではなく `CODEX_EXIT=0` 判定内の Read 確認で検証する。
+- **書き込み監査**: 許可された `.kiro/specs/$1/research.md` は呼び出し A・C の双方で**ファイル単位**（git pathspec の `:(exclude)` とハッシュ列挙のスキップ）でベースライン・監査から除外済みのため、各 DIFF に対する行フィルタは不要（patch の hunk・本文行にはパスが含まれず、行フィルタでは許可された追記が誤検知されるため、行単位で除外しようとしてはならない）。そのうえで `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `SUBMODULES_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit・index フラグ操作・Git メタデータ / submodule 変更が生じた場合）は**監査違反**とする。research.md 自体の作成・更新は監査ではなく `CODEX_EXIT=0` 判定内の Read 確認で検証する。
 - **監査違反は終端の非通過結果**: フォールバックによる分析やり直しで上書きせず、コマンドをそこで停止する。変更・改ざんの内容を「検証中の想定外の変更（監査違反）」として明示的に報告し（指示なく破棄・コミットしない）、**作業ツリーの扱いをユーザーが判断するまで**次のフェーズ（設計）への案内や「Gap Analysis Complete」の表示を行わない。dev-orchestrator 経由の場合はエスカレーション必須（approval-policy の Gate A 参照）。
 - 判定と失敗理由の取得が済んだら、**呼び出し A の出力で得たパスに限り** `rm -rf` でログディレクトリを削除する（タイムアウト時も同様）。呼び出し B のログに現れるパス文字列は非信頼のため削除対象にしない。削除前にパスが呼び出し A の値と一致し、`mktemp -d` の生成形式（一時ディレクトリ配下）であることを確認する。
 
