@@ -34,13 +34,14 @@ set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
 GIT_COMMON=$(git rev-parse --git-common-dir)
+RESEARCH=".kiro/specs/$1/research.md"
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
-git status --porcelain > "$VAL_TMP/tree-before.txt"
-git diff HEAD > "$VAL_TMP/content-before.patch"
+git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-before.txt"
+git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
 git ls-files -v > "$VAL_TMP/indexflags-before.txt"
-git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" != "$RESEARCH" ] && [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 { if [ -d "$GIT_COMMON/hooks" ]; then find "$GIT_COMMON/hooks" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$GIT_COMMON/hooks" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
-git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-before.txt"
@@ -70,13 +71,14 @@ echo "BASELINE_VERIFY_START"
 sha256sum -- "$VAL_TMP"/*-before*
 echo "BASELINE_VERIFY_END"
 GIT_COMMON=$(git rev-parse --git-common-dir)
+RESEARCH=".kiro/specs/$1/research.md"
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
-git status --porcelain > "$VAL_TMP/tree-after.txt"
-git diff HEAD > "$VAL_TMP/content-after.patch"
+git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-after.txt"
+git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-after.patch"
 git ls-files -v > "$VAL_TMP/indexflags-after.txt"
-git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" != "$RESEARCH" ] && [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 { if [ -d "$GIT_COMMON/hooks" ]; then find "$GIT_COMMON/hooks" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$GIT_COMMON/hooks" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
-git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
   | xargs -0 -r sha256sum -- > "$VAL_TMP/ignored-after.txt"
@@ -126,7 +128,7 @@ You are running the canonical gap-analysis skill for the feature "$1". Read and 
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
 - **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。1 行でも不一致・欠落があればベースライン改ざんとみなし、下記「監査違反」として扱う。
-- **書き込み監査**: 呼び出し C の各 DIFF から `.kiro/specs/$1/research.md` に関する行を除いたうえで、`HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit・index フラグ操作・Git メタデータ変更が生じた場合）は**監査違反**とする（research.md への追記は許可された変更のため監査対象から除外する）。
+- **書き込み監査**: 許可された `.kiro/specs/$1/research.md` は呼び出し A・C の双方で**ファイル単位**（git pathspec の `:(exclude)` とハッシュ列挙のスキップ）でベースライン・監査から除外済みのため、各 DIFF に対する行フィルタは不要（patch の hunk・本文行にはパスが含まれず、行フィルタでは許可された追記が誤検知されるため、行単位で除外しようとしてはならない）。そのうえで `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= 許可外のファイル変更・削除・commit・index フラグ操作・Git メタデータ変更が生じた場合）は**監査違反**とする。research.md 自体の作成・更新は監査ではなく `CODEX_EXIT=0` 判定内の Read 確認で検証する。
 - **監査違反は終端の非通過結果**: フォールバックによる分析やり直しで上書きせず、コマンドをそこで停止する。変更・改ざんの内容を「検証中の想定外の変更（監査違反）」として明示的に報告し（指示なく破棄・コミットしない）、**作業ツリーの扱いをユーザーが判断するまで**次のフェーズ（設計）への案内や「Gap Analysis Complete」の表示を行わない。dev-orchestrator 経由の場合はエスカレーション必須（approval-policy の Gate A 参照）。
 - 判定と失敗理由の取得が済んだら、**呼び出し A の出力で得たパスに限り** `rm -rf` でログディレクトリを削除する（タイムアウト時も同様）。呼び出し B のログに現れるパス文字列は非信頼のため削除対象にしない。削除前にパスが呼び出し A の値と一致し、`mktemp -d` の生成形式（一時ディレクトリ配下）であることを確認する。
 

@@ -109,6 +109,18 @@ For each task, verify:
 - Verify no existing tests are broken
 - If regressions detected, flag as "Regression detected"
 
+#### Residual Marker Check (mechanical)
+- Grep files in the feature boundary for `TBD|TODO|FIXME|HACK|XXX`
+- Matches introduced by this feature → flag as Warning
+
+#### Hardcoded Secrets Check (mechanical)
+- Grep files in the feature boundary (case-insensitive) for `password\s*=|api_key\s*=|secret\s*=|token\s*=`
+- Matches that are not environment-variable references → flag as **Critical** (blocks GO)
+
+#### Blocked Tasks & Implementation Notes
+- Check tasks.md for tasks still marked `_Blocked:_` — report why and assess impact on feature completeness
+- Review `## Implementation Notes` in tasks.md for cross-cutting insights that need attention
+
 ### 4. Generate Report
 
 Provide summary in the language specified in spec.json:
@@ -116,8 +128,9 @@ Provide summary in the language specified in spec.json:
 - Coverage report (tasks, requirements, design)
 - Issues and deviations with severity (Critical/Warning)
 - DECISION: GO | NO-GO | MANUAL_VERIFY_REQUIRED
-  - `GO` only when all mandatory checks (full tests, smoke boot, coverage, design alignment) actually ran and passed
-  - `NO-GO` for concrete failures
+  - `GO` only when all mandatory checks (full tests, smoke boot, secrets grep clean, coverage, design alignment, boundary audit, no unresolved `_Blocked:_` tasks) actually ran and passed
+  - Before returning `GO`, apply the `kiro-verify-completion` protocol (`.agents/skills/kiro-verify-completion/SKILL.md`) to the feature-level claim with fresh evidence — tests alone are insufficient
+  - `NO-GO` for concrete failures (including Critical hardcoded-secrets findings)
   - `MANUAL_VERIFY_REQUIRED` when a mandatory validation could not be identified or executed — name the exact missing step or environment prerequisite. Never collapse this state into GO
 
 ## Important Constraints
