@@ -45,9 +45,13 @@ sandbox bypass の確認として、実行前後の作業ツリーを**状態と
 set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
+GIT_DIR=$(git rev-parse --git-dir)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain > "$VAL_TMP/tree-before.txt"
 git diff HEAD > "$VAL_TMP/content-before.patch"
+git ls-files -v > "$VAL_TMP/indexflags-before.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
+{ if [ -d "$GIT_DIR/hooks" ]; then find "$GIT_DIR/hooks" -type f -print0 | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_DIR/config"; } > "$VAL_TMP/gitmeta-before.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -77,9 +81,13 @@ echo "CODEX_EXIT=$codex_exit"
 echo "BASELINE_VERIFY_START"
 sha256sum -- "$VAL_TMP"/*-before*
 echo "BASELINE_VERIFY_END"
+GIT_DIR=$(git rev-parse --git-dir)
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain > "$VAL_TMP/tree-after.txt"
 git diff HEAD > "$VAL_TMP/content-after.patch"
+git ls-files -v > "$VAL_TMP/indexflags-after.txt"
+git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
+{ if [ -d "$GIT_DIR/hooks" ]; then find "$GIT_DIR/hooks" -type f -print0 | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_DIR/config"; } > "$VAL_TMP/gitmeta-after.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -90,6 +98,12 @@ echo "TREE_DIFF_START"
 diff "$VAL_TMP/tree-before.txt" "$VAL_TMP/tree-after.txt"
 echo "CONTENT_DIFF_START"
 diff "$VAL_TMP/content-before.patch" "$VAL_TMP/content-after.patch" | head -200
+echo "TRACKED_DIFF_START"
+diff "$VAL_TMP/tracked-before.txt" "$VAL_TMP/tracked-after.txt"
+echo "INDEXFLAGS_DIFF_START"
+diff "$VAL_TMP/indexflags-before.txt" "$VAL_TMP/indexflags-after.txt"
+echo "GITMETA_DIFF_START"
+diff "$VAL_TMP/gitmeta-before.txt" "$VAL_TMP/gitmeta-after.txt"
 echo "UNTRACKED_DIFF_START"
 diff "$VAL_TMP/untracked-before.txt" "$VAL_TMP/untracked-after.txt"
 echo "IGNORED_DIFF_START"
@@ -106,6 +120,8 @@ echo "AUDIT_END"
 > - `sha256sum` の引数は `--` でオプション解析を終了させる（`--help` のような名前の未追跡ファイルがあると、ハッシュの代わりに固定のヘルプ文が出力され before/after 比較が無効化されるため）。
 > - 生成物除外の正規表現は `(^|/)` で**ネストした生成物ディレクトリ**（monorepo の `packages/app/node_modules/` 等）にも一致させる。リポジトリ直下しか除外しないと、依存物・成果物を全ハッシュして監査が極端に遅くなる。
 > - **ベースラインの改ざん検知**: codex は同一 OS ユーザーの unrestricted プロセスとして動くため、一時ディレクトリを探索して `*-before` ファイルを書き換え、監査を空振りさせることが理論上可能。対策として呼び出し A が `BASELINE_HASHES` としてベースラインファイル自体のハッシュを**会話ログ（codex から到達不能な信頼記録）**に残し、呼び出し C の冒頭で `BASELINE_VERIFY` として再計算する。両者は**呼び出し A の出力と突き合わせて**一致を確認する。
+> - **追跡済みファイルは Git の表示に依存せず独立ハッシュする**（`TRACKED_DIFF`）。`assume-unchanged` / `skip-worktree` が設定されたファイルは変更しても `git status` / `git diff HEAD` に現れず、codex 自身が index フラグを設定することもできるため。フラグ設定そのものも `git ls-files -v` の前後比較（`INDEXFLAGS_DIFF`）で検出する。
+> - **Git メタデータも監査対象**（`GITMETA_DIFF`）: `.git/hooks/` 配下と `.git/config` をハッシュ比較する。監査外のまま hooks や config（`core.hooksPath`・credential helper 等）を仕込まれると、後続の Gate E の `git push` で親ユーザー権限のフックが起動するため。
 > - Codex は cwd 配下の `AGENTS.md` を自動ロードする。
 > - 一時ファイルは `umask 077` + `mktemp -d`（モード 0700 のプライベートディレクトリ）配下に保存する。codex の出力や diff には secrets grep の検出値などの機密情報が含まれ得るため、共有マシンの他ユーザーから読める固定の `/tmp` パスには置かない。
 
@@ -124,7 +140,7 @@ You are running the canonical integration validation skill for the feature "{fea
   - spec-run と異なり検証はスキップできないため、失敗理由を問わず（使用制限に限らず）フォールバックする。
   - タイムアウト時も**呼び出し C の監査は必ず実行してから**フォールバックする。
 - **ベースライン検証**: 呼び出し C の `BASELINE_VERIFY` を呼び出し A の `BASELINE_HASHES`（会話ログ上の信頼記録）と突き合わせる。**1 行でも不一致・欠落があればベースライン改ざんとみなし**、監査結果全体を信用せず、最終判定を `NO-GO` として「検証中にベースラインファイルが書き換えられた」旨をエスカレーションする（改ざん自体が重大インシデントであり、フォールバック再実行で握りつぶさない）。
-- **作業ツリー監査**: 呼び出し C の `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= codex 実行によって新たに変更・commit が生じた、既存 dirty ファイルや ignored ファイルの内容がさらに書き換えられた場合）は、その内容を「検証中の想定外の変更」として報告する。ユーザーの指示なく破棄・コミットしない。実行前から存在した dirty（before に含まれる分）は想定外扱いにしない。
+- **作業ツリー監査**: 呼び出し C の `HEAD_DIFF` / `TREE_DIFF` / `CONTENT_DIFF` / `TRACKED_DIFF` / `INDEXFLAGS_DIFF` / `GITMETA_DIFF` / `UNTRACKED_DIFF` / `IGNORED_DIFF` のいずれかが空でない場合（= codex 実行によって新たに変更・commit が生じた、既存 dirty ファイルや ignored ファイルの内容がさらに書き換えられた場合）は、その内容を「検証中の想定外の変更」として報告する。ユーザーの指示なく破棄・コミットしない。実行前から存在した dirty（before に含まれる分）は想定外扱いにしない。
 - **監査差分は最終判定に反映する**: 監査が非 clean の場合、codex レポートの DECISION が `GO` でも**最終判定を `MANUAL_VERIFY_REQUIRED` に降格**する（変更内容が要件・設計への実害や機密設定の破損を示すなら `NO-GO`）。降格後の判定を Display Result と呼び出し元（spec-run / Gate D）へ伝播させ、`GO` のまま通過させない。
 - 判定・監査・失敗理由の取得が済んだら一時ディレクトリを削除する（機密情報を含み得るログ・diff を残さない）。削除対象は**呼び出し A の出力で得たパスに限る** — 呼び出し B のログに現れるパス文字列は非信頼のため使わず、削除前にパスが呼び出し A の値と一致し `mktemp -d` の生成形式（一時ディレクトリ配下）であることを確認する。
 
