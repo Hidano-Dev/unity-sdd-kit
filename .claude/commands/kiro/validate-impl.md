@@ -50,14 +50,14 @@ GIT_COMMON=$(git rev-parse --git-common-dir)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain > "$VAL_TMP/tree-before.txt"
 git diff HEAD > "$VAL_TMP/content-before.patch"
-git ls-files -v > "$VAL_TMP/indexflags-before.txt"
+{ git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
-git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
+git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-before.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-before.txt"
 echo "VAL_TMP=$VAL_TMP"
 echo "BASELINE_HASHES_START"
 sha256sum -- "$VAL_TMP"/*-before*
@@ -89,14 +89,14 @@ GIT_COMMON=$(git rev-parse --git-common-dir)
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain > "$VAL_TMP/tree-after.txt"
 git diff HEAD > "$VAL_TMP/content-after.patch"
-git ls-files -v > "$VAL_TMP/indexflags-after.txt"
+{ git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
-git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
+git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-after.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-after.txt"
 echo "HEAD_DIFF_START"
 diff "$VAL_TMP/head-before.txt" "$VAL_TMP/head-after.txt"
 echo "TREE_DIFF_START"
@@ -126,7 +126,7 @@ echo "AUDIT_END"
 > - 追跡・未追跡・ignored の列挙では **symlink は `stat`（名前・ターゲット・type・mode）のみ記録し、内容ハッシュは通常ファイルに限る**。symlink の参照先を辿ってハッシュすると、`/dev/zero` や巨大な外部ファイルを指すリンクで列挙が停止し、タイムアウト対象外の呼び出し A や監査の呼び出し C が固まるため（例外は hooks — エントリ数が少なく参照先内容の改変検出が必要なため、リンクを辿ってハッシュするが、**参照先が通常ファイルかつ 1MB 以下**の場合に限る。FIFO・デバイス・巨大ファイル・解決不能なリンクは `stat -L` の type / size 記録に留め、ハングを防ぐ）。
 > - 生成物除外の正規表現は `(^|/)` で**ネストした生成物ディレクトリ**（monorepo の `packages/app/node_modules/` 等）にも一致させる。リポジトリ直下しか除外しないと、依存物・成果物を全ハッシュして監査が極端に遅くなる。
 > - **ベースラインの改ざん検知**: codex は同一 OS ユーザーの unrestricted プロセスとして動くため、一時ディレクトリを探索して `*-before` ファイルを書き換え、監査を空振りさせることが理論上可能。対策として呼び出し A が `BASELINE_HASHES` としてベースラインファイル自体のハッシュを**会話ログ（codex から到達不能な信頼記録）**に残し、呼び出し C の冒頭で `BASELINE_VERIFY` として再計算する。両者は**呼び出し A の出力と突き合わせて**一致を確認する。
-> - **追跡済みファイルは Git の表示に依存せず独立ハッシュする**（`TRACKED_DIFF`）。`assume-unchanged` / `skip-worktree` が設定されたファイルは変更しても `git status` / `git diff HEAD` に現れず、codex 自身が index フラグを設定することもできるため。フラグ設定そのものも `git ls-files -v` の前後比較（`INDEXFLAGS_DIFF`）で検出する。内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録する — 内容を変えない `chmod +x` や symlink 化は content SHA・status・index フラグのいずれにも現れないため。
+> - **追跡済みファイルは Git の表示に依存せず独立ハッシュする**（`TRACKED_DIFF`）。`assume-unchanged` / `skip-worktree` が設定されたファイルは変更しても `git status` / `git diff HEAD` に現れず、codex 自身が index フラグを設定することもできるため。フラグ設定そのものも `git ls-files -v` の前後比較（`INDEXFLAGS_DIFF`）で検出する。同ファイルには `git ls-files --stage` の **index blob ID（mode + object name）** も含める — `git update-index --cacheinfo` で staged 内容だけを別 blob に差し替える改変は、status・worktree diff・worktree ハッシュのいずれにも現れないため、blob ID の前後比較でのみ検出できる。内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録する — 内容を変えない `chmod +x` や symlink 化は content SHA・status・index フラグのいずれにも現れないため。
 > - **Git メタデータも監査対象**（`GITMETA_DIFF`）: hooks 配下と `config` をハッシュ比較する。監査外のまま hooks や config（`core.hooksPath`・credential helper 等）を仕込まれると、後続の Gate E の `git push` で親ユーザー権限のフックが起動するため。
 >   - hooks は内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録する。内容ハッシュだけでは **symlink hook の追加や既存 hook への `chmod +x`** を検出できないため。内容ハッシュは symlink も対象に含める（`sha256sum` はリンクを辿って**参照先の内容**をハッシュするため、リポジトリ外の参照先だけを書き換える改変も検出できる）。
 >   - 呼び出し A は `trap 'rm -rf "$VAL_TMP"' ERR` を設定し、ベースライン取得の途中失敗時にも一時ディレクトリを残さない（失敗時は `VAL_TMP=` が呼び出し元に渡らず、後段の削除処理に到達できないため）。

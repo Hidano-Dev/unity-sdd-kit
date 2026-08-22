@@ -40,14 +40,14 @@ if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-before
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-before.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-before.patch"
-git ls-files -v > "$VAL_TMP/indexflags-before.txt"
+{ git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
-git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-before.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-before.txt"
 echo "VAL_TMP=$VAL_TMP"
 echo "BASELINE_HASHES_START"
 sha256sum -- "$VAL_TMP"/*-before*
@@ -79,14 +79,14 @@ if [ -f "$RESEARCH" ]; then sha256sum -- "$RESEARCH" > "$VAL_TMP/research-after.
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain -- . ":(exclude)$RESEARCH" > "$VAL_TMP/tree-after.txt"
 git diff HEAD -- . ":(exclude)$RESEARCH" > "$VAL_TMP/content-after.patch"
-git ls-files -v > "$VAL_TMP/indexflags-after.txt"
+{ git ls-files -v; git ls-files --stage; } > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ "$f" = "$RESEARCH" ]; then continue; fi; if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; elif [ -e "$f" ]; then stat -c '%N %F %a' -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
 HOOKS_DIR=$(git rev-parse --git-path hooks)
 { git config --show-origin --list; if [ -d "$HOOKS_DIR" ]; then find "$HOOKS_DIR" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$HOOKS_DIR" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' h; do if [ -f "$h" ] && [ "$(stat -Lc %s -- "$h")" -le 1048576 ]; then sha256sum -- "$h"; else stat -Lc '%N %F %s' -- "$h" 2>/dev/null || echo "UNRESOLVED $h"; fi; done; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
-git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
+git ls-files --others --exclude-standard -z -- . ":(exclude)$RESEARCH" | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z -- . ":(exclude)$RESEARCH" \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
-  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-after.txt"
+  | while IFS= read -r -d '' f; do if [ -L "$f" ]; then stat -c '%N %F %a' -- "$f"; elif [ -f "$f" ]; then stat -c '%N %F %a' -- "$f"; sha256sum -- "$f"; fi; done > "$VAL_TMP/ignored-after.txt"
 echo "RESEARCH_DIFF_START"
 diff "$VAL_TMP/research-before.txt" "$VAL_TMP/research-after.txt"
 echo "RESEARCH_APPEND_CHECK_START"
