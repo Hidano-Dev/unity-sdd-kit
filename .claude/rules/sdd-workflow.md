@@ -44,3 +44,11 @@ Kiro-style Spec-Driven Development on an agentic SDLC
 - Load entire `.kiro/steering/` as project memory
 - Default files: `product.md`, `tech.md`, `structure.md`
 - Custom files are supported (managed via `/kiro:steering-custom`)
+
+## Git Workflow
+<!--
+  取り込み側テンプレート (unity-sdd-template 等) は自身の CLAUDE.md から
+  本ファイルだけを import する契約のため、Git 運用ルールはここから相対 import で
+  読み込ませる（@ の相対パスは import を書いたファイルのディレクトリ基準で解決される）。
+-->
+@git-workflow.md
