@@ -101,8 +101,9 @@ For each task, verify:
 - If misalignment found, flag as "Design deviation"
 
 #### Boundary Audit
-- Compare completed work against design.md's Boundary Commitments / Out of Boundary / Allowed Dependencies (when present)
+- Compare completed work against design.md's Boundary Commitments / Out of Boundary / Allowed Dependencies / Revalidation Triggers (when present)
 - Flag cross-task spillover where one area absorbed another boundary's responsibility, and hidden dependencies not declared in the design
+- If a Revalidation Trigger fired (a committed boundary changed), verify the affected adjacent specs or integration points were actually re-checked; if not, flag it — an unverified fired trigger blocks GO
 
 #### Regression Check
 - Run full test suite (if available)
