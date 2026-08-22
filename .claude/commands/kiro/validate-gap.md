@@ -33,13 +33,13 @@ Codex の存在確認:
 set -euo pipefail
 umask 077
 VAL_TMP=$(mktemp -d)
-GIT_DIR=$(git rev-parse --git-dir)
+GIT_COMMON=$(git rev-parse --git-common-dir)
 git rev-parse HEAD > "$VAL_TMP/head-before.txt"
 git status --porcelain > "$VAL_TMP/tree-before.txt"
 git diff HEAD > "$VAL_TMP/content-before.patch"
 git ls-files -v > "$VAL_TMP/indexflags-before.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-before.txt"
-{ if [ -d "$GIT_DIR/hooks" ]; then find "$GIT_DIR/hooks" -type f -print0 | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_DIR/config"; } > "$VAL_TMP/gitmeta-before.txt"
+{ if [ -d "$GIT_COMMON/hooks" ]; then find "$GIT_COMMON/hooks" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$GIT_COMMON/hooks" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-before.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-before.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -69,13 +69,13 @@ echo "CODEX_EXIT=$codex_exit"
 echo "BASELINE_VERIFY_START"
 sha256sum -- "$VAL_TMP"/*-before*
 echo "BASELINE_VERIFY_END"
-GIT_DIR=$(git rev-parse --git-dir)
+GIT_COMMON=$(git rev-parse --git-common-dir)
 git rev-parse HEAD > "$VAL_TMP/head-after.txt"
 git status --porcelain > "$VAL_TMP/tree-after.txt"
 git diff HEAD > "$VAL_TMP/content-after.patch"
 git ls-files -v > "$VAL_TMP/indexflags-after.txt"
 git ls-files -z | while IFS= read -r -d '' f; do if [ -f "$f" ]; then sha256sum -- "$f"; fi; done > "$VAL_TMP/tracked-after.txt"
-{ if [ -d "$GIT_DIR/hooks" ]; then find "$GIT_DIR/hooks" -type f -print0 | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_DIR/config"; } > "$VAL_TMP/gitmeta-after.txt"
+{ if [ -d "$GIT_COMMON/hooks" ]; then find "$GIT_COMMON/hooks" -mindepth 1 -print0 | sort -z | xargs -0 -r stat -c '%N %F %a'; find "$GIT_COMMON/hooks" -type f -print0 | sort -z | xargs -0 -r sha256sum --; fi; sha256sum -- "$GIT_COMMON/config"; } > "$VAL_TMP/gitmeta-after.txt"
 git ls-files --others --exclude-standard -z | xargs -0 -r sha256sum -- > "$VAL_TMP/untracked-after.txt"
 git ls-files --others --ignored --exclude-standard -z \
   | { grep -zEv '(^|/)(Library|Temp|Logs|obj|bin|node_modules|dist|build|out|coverage|\.gradle|target)/' || true; } \
@@ -102,7 +102,7 @@ echo "AUDIT_END"
 > **Note:**
 > - ignored ファイル（`.env` やローカル設定）も監査対象に含める（`git status` / `git diff` に現れないため）。ネストした生成物ディレクトリは `(^|/)` パターンで除外する。設定ファイル類を除外パターンに追加してはならない。
 > - `BASELINE_VERIFY` は呼び出し A が会話ログ（codex から到達不能な信頼記録）に残した `BASELINE_HASHES` と突き合わせ、codex によるベースラインファイルの書き換えを検知する。
-> - 追跡済みファイルは Git の表示に依存せず独立ハッシュする（`TRACKED_DIFF`。`assume-unchanged` / `skip-worktree` による隠蔽対策）。index フラグは `INDEXFLAGS_DIFF`、`.git/hooks` / `.git/config` は `GITMETA_DIFF` で前後比較する（監査外のまま hooks / config を仕込まれると後続の `git push` 等で親ユーザー権限のフックが起動するため）。
+> - 追跡済みファイルは Git の表示に依存せず独立ハッシュする（`TRACKED_DIFF`。`assume-unchanged` / `skip-worktree` による隠蔽対策）。index フラグは `INDEXFLAGS_DIFF`、hooks / `config` は `GITMETA_DIFF` で前後比較する（監査外のまま hooks / config を仕込まれると後続の `git push` 等で親ユーザー権限のフックが起動するため）。hooks は内容ハッシュに加えて `stat`（名前・symlink ターゲット・file type・mode）も記録し、symlink hook の追加や `chmod +x` も検出する。パスは linked worktree でも共有ディレクトリを指す `git rev-parse --git-common-dir` で解決する。
 
 > **Note:**
 > - prompt は heredoc 経由で stdin に渡す（クォート/エスケープ事故回避）。`-` 引数で stdin から読み取らせる。
