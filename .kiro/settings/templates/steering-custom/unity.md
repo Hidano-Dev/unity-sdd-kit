@@ -1,32 +1,32 @@
-# Unity Project Standards
+# Unity プロジェクト規約
 
-[Purpose: record Unity-specific decisions that every spec in this repository must follow]
+[目的: このリポジトリのすべての spec が従うべき、Unity 固有の決定事項を記録する]
 
-## Projects
-- Layout: [multi-project (one Unity project per top-level directory) | single project]
-- Projects: [`<dir>` — purpose, Unity version from `ProjectSettings/ProjectVersion.txt`]
-- Render pipeline: [URP | HDRP | Built-in]
+## プロジェクト
+- 構成: [マルチプロジェクト（リポジトリ直下の各ディレクトリが 1 つの Unity プロジェクト） | 単一プロジェクト]
+- プロジェクト一覧: [`<ディレクトリ>` — 用途、`ProjectSettings/ProjectVersion.txt` の Unity バージョン]
+- レンダーパイプライン: [URP | HDRP | Built-in]
 
-## Assemblies
-- One `.asmdef` per feature area; Runtime / Editor / Tests split
-- Placement: `Assets/<Feature>/Runtime`, `Assets/<Feature>/Editor`, `Assets/<Feature>/Tests/EditMode`, `Assets/<Feature>/Tests/PlayMode`
-- Root namespace: [`Company.Product.Feature`]
+## アセンブリ
+- 機能単位で `.asmdef` を 1 つ用意し、Runtime / Editor / Tests に分ける
+- 配置: `Assets/<Feature>/Runtime`、`Assets/<Feature>/Editor`、`Assets/<Feature>/Tests/EditMode`、`Assets/<Feature>/Tests/PlayMode`
+- ルート名前空間: [`Company.Product.Feature`]
 
-## Testing
-- Framework: Unity Test Framework (NUnit)
-- Prefer EditMode tests for logic; PlayMode only for frame / physics / input behavior
-- Editor executable: [path pinned to the `ProjectVersion.txt` version, if any]
-- Test command: [repository-specific command | `unity test <project-dir> --mode EditMode` (Unity CLI) | Unity Test Runner batchmode]
-- Keep MonoBehaviours thin; put logic in plain C# classes so it is testable in EditMode
+## テスト
+- フレームワーク: Unity Test Framework（NUnit）
+- ロジックは EditMode テストを優先し、PlayMode はフレーム進行・物理・入力など実行時にしか確かめられないものに限る
+- Editor 実行ファイル: [`ProjectVersion.txt` のバージョンに固定したパス（指定がある場合）]
+- テストコマンド: [リポジトリ固有のコマンド | `unity test <プロジェクトディレクトリ> --mode EditMode`（Unity CLI） | Unity Test Runner の batchmode 実行]
+- MonoBehaviour は薄く保ち、ロジックは素の C# クラスに置いて EditMode でテストできるようにする
 
-## Assets & Serialization
-- Do not hand-edit scene / prefab / asset YAML; change them through the Editor (Unity CLI `unity command`) or generate from code
-- `.meta` files: let Unity generate them; hand-written GUIDs must be fresh random 32-hex values
-- Commit `Packages/packages-lock.json` when packages change; never commit `Library/`, `Temp/`, `Logs/`, `UserSettings/`
+## アセットとシリアライズ
+- シーン・プレハブ・アセットの YAML を手で編集しない。Editor 経由（Unity CLI の `unity command`）で変更するか、コードから生成する
+- `.meta` ファイルは Unity に生成させる。手で書く場合、GUID は必ずランダムな 32 桁 hex を新たに生成する
+- パッケージを変更したら `Packages/packages-lock.json` をコミットする。`Library/`、`Temp/`、`Logs/`、`UserSettings/` はコミットしない
 
-## Packages
-- Third-party registries: [scopedRegistries in use]
-- Adding a package: [policy — e.g. official registry first, version pinning]
+## パッケージ
+- サードパーティのレジストリ: [使用している scopedRegistries]
+- パッケージ追加の方針: [例: 公式レジストリを優先、バージョンを固定する]
 
 ---
-_Focus on decisions that specs must respect. Tool usage details live in the unity-cli skill._
+_spec が守るべき決定事項に絞って書く。ツールの使い方の詳細は unity-cli skill に任せる。_
