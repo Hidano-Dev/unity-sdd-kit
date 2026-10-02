@@ -156,6 +156,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 実装したエージェント自身の `OK` だけでタスクを成功扱いにしない。後続タスクが未レビューの変更を前提に進まないよう、**次のタスクへ進む前に**、実装とは別系統のエンジンでそのタスクの差分をレビューする:
 
 - レビューエンジン: 実装が codex なら `claude -p`。実装が claude（使用制限によるフォールバック）の場合、Codex は制限中の可能性が高いので `codex exec` は使わず、このセッション（オーケストレーター）自身が実装とは独立にレビューする。どちらも使えない場合もこのセッション自身がレビューする。
+- `claude -p` でレビューする場合は、フォールバック実行と同じくネスト起動の保護を解除して起動し、出力を試行ログとは別に保存する: `unset CLAUDECODE && echo "" | claude -p "<review_prompt>" --max-turns 30 --verbose 2>&1 | tee "$run_dir/review-$attempt.log"`（終了コードは `${PIPESTATUS[0]}` で取る）。`codex exec` でレビューする場合も同様に `"$run_dir/review-$attempt.log"` へ保存する。
 - レビュー実行が使用制限（Step 2 と同じシグネチャ）で失敗した場合は REJECTED にせず、このセッション自身のレビューに切り替えてやり直す（制限による失敗で正しい実装を巻き戻さない）。
 - レビュー対象: この試行で作られたコミット（`git diff "$pre_head"..HEAD`）**だけ**。レビューの前に、作業ツリーに未コミットの変更が残っていれば Working Tree Baseline の手順 1 で stash して「コミット漏れ」としてサマリーに記録し、レビューした内容とブランチに残る内容を一致させる（承認された変更を後から捨てることがないように）。
 - 実装者の報告: 実装エンジンの出力を保存した試行ログ（`$run_dir/codex-<attempt>.log` または `$run_dir/claude-<attempt>.log`）をレビュアーに渡す。kiro-review は behavioral task の `RED_PHASE_OUTPUT` を必須入力とするため、実装プロンプトでその出力を求めている。ログに `RED_PHASE_OUTPUT:` が無い behavioral task は、レビュアーの判定どおり REJECTED として扱う。
@@ -178,7 +179,7 @@ Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read req
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
-- **依存関係**: 各タスクの実行前に、tasks.md にある当該タスクの `_Depends: X.Y, ..._`（同じ spec 内のタスク ID）を確認する。参照先が tasks.md で `[x]` でもなく、この実行で OK（レビュー APPROVED）にもなっていない場合（FAIL / TIMEOUT / SKIPPED / 未実行）は、そのタスクを実行せず `SKIPPED (blocked by X.Y)` として記録する。さらに、tasks.md では記述順が主要な依存関係なので、`(P)` の付いていないタスクは**同じ spec 内で直前の leaf タスク**にも暗黙に依存するとみなし、直前のタスクが `[x]` でもこの実行で OK でもなければ同様に `SKIPPED (blocked by X.Y)` とする（`(P)` のタスクは明示した `_Depends:` だけを見る）。ブロックは推移的に伝わる（ブロックされたタスクに依存するタスクもブロックする）。ブロックによる SKIPPED は連続失敗ガードの回数に数えない
+- **依存関係**: 各タスクの実行前に、tasks.md にある当該タスクの `_Depends: X.Y, ..._`（同じ spec 内のタスク ID）を確認する。参照先が tasks.md で `[x]` でもなく、この実行で OK（レビュー APPROVED）にもなっていない場合（FAIL / TIMEOUT / SKIPPED / 未実行）は、そのタスクを実行せず `SKIPPED (blocked by X.Y)` として記録する。さらに、tasks.md では記述順が主要な依存関係なので、`(P)` の付いていないタスクは**同じ spec 内でそれより前にあるすべての leaf タスク**に暗黙に依存するとみなし、先行タスクのうち 1 つでも `[x]` でもこの実行で OK でもないものがあれば同様に `SKIPPED (blocked by X.Y)` とする（`(P)` のタスクは明示した `_Depends:` だけを見る）。ブロックは推移的に伝わる（ブロックされたタスクに依存するタスクもブロックする）。ブロックによる SKIPPED は連続失敗ガードの回数に数えない
 - **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録し、Working Tree Baseline の手順で `pre_head` に戻して（作業は退避して）から自動的に次のタスクへ進む
 - ただし **3 タスク連続で FAIL/TIMEOUT（レビュー REJECTED を含む）** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスクを SKIPPED として記録してサマリーへ進む
 - 途中のタスクが FAIL でも後続タスクは独立して試行する（依存で連鎖失敗する場合は上記の連続失敗ガードで止まる）
