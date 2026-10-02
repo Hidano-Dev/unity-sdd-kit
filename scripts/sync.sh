@@ -49,7 +49,10 @@ fi
 # ── 事前検査: 同期先にシンボリックリンク / submodule があれば中止 ──────
 # リンクがあると cp はリンク先へ書き込み、無関係なファイルを変更しかねない。
 # submodule (gitlink) の中に書いても superproject のコミットに乗らない。
-kit_skills=$(cd "$KIT/$SKILLS_DIR" && ls -d "$SKILL_PREFIX"*/ 2>/dev/null | sed 's#/$##' || true)
+kit_skills=""
+for d in "$KIT/$SKILLS_DIR/$SKILL_PREFIX"*/; do
+  [ -d "$d" ] && kit_skills="$kit_skills $(basename "$d")"
+done
 check_paths="$OWNED_DIRS $OWNED_FILES AGENTS.md CLAUDE.md"
 for s in $kit_skills; do check_paths="$check_paths $SKILLS_DIR/$s"; done
 bad=""
