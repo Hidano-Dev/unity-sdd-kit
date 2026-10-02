@@ -15,7 +15,7 @@ argument-hint: <feature-name>
 Check that tasks have been generated:
 - Verify `.kiro/specs/$1/` exists
 - Verify `.kiro/specs/$1/tasks.md` exists
-- Verify `.kiro/specs/$1/spec.json` has `approvals.requirements.approved`, `approvals.design.approved` and `approvals.tasks.approved` all true and `ready_for_implementation` true (never start unattended implementation on an unreviewed draft)
+- Verify `.kiro/specs/$1/spec.json` has `approvals.requirements.approved`, `approvals.design.approved` and `approvals.tasks.approved` all true (never start unattended implementation on an unreviewed draft; `ready_for_implementation` is only set by dev-orchestrator, so do not require it)
 
 If validation fails, stop and tell the user what is missing: generate tasks first (`/kiro:spec-tasks $1`) or finish reviewing and approving the remaining phases.
 
@@ -83,7 +83,7 @@ tar --null -T "$snap/ignored.list" -cf "$snap/ignored.tar" 2>/dev/null || true
 3. ignored ファイルを**その試行の**スナップショット（`$run_dir/a$attempt`）と比べる（`gen_re` に当たる生成物は対象外）。試行中に増えた・変わった ignored ファイルは `"$run_dir/failed-$attempt/"` へ移動して退避し、変更・削除されたものは `"$run_dir/a$attempt/ignored.tar"` から復元する
 4. 退避先（stash メッセージ / ブランチ名 / `$run_dir/failed-*`）をサマリーに記録する
 
-**OK（レビュー APPROVED）のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。ignored ファイルが変わっていれば、意図した変更かどうかをサマリーで報告する。
+**実装エンジンが OK を出したタスクでも**、Step 4 のレビューに入る前に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まず、レビューはコミット済みの内容だけを対象にする）。ignored ファイルが変わっていれば、意図した変更かどうかをサマリーで報告する。
 
 **終了時**: ログとスナップショットは不要になったら削除してよいが、退避物（`failed-*`）がある場合は残し、その場所をサマリーに明記する。
 
@@ -155,18 +155,19 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 実装したエージェント自身の `OK` だけでタスクを成功扱いにしない。後続タスクが未レビューの変更を前提に進まないよう、**次のタスクへ進む前に**、実装とは別系統のエンジンでそのタスクの差分をレビューする:
 
 - レビューエンジン: 実装が codex なら `claude -p`、実装が claude（フォールバック）なら `codex exec`。どちらも使えない場合はこのセッション（オーケストレーター）自身がレビューする。
-- レビュー対象: `git diff "$pre_head"..HEAD`（この試行で作られたコミット）と、作業ツリーに残った変更。
+- レビュー対象: この試行で作られたコミット（`git diff "$pre_head"..HEAD`）**だけ**。レビューの前に、作業ツリーに未コミットの変更が残っていれば Working Tree Baseline の手順 1 で stash して「コミット漏れ」としてサマリーに記録し、レビューした内容とブランチに残る内容を一致させる（承認された変更を後から捨てることがないように）。
 - レビュアーへの指示（`<feature>` / `<task_id>` / `<task_title>` / `<pre_head>` は実値に置換）:
 
 ```
-Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read requirements.md, design.md and tasks.md yourself). Run `git diff <pre_head>..HEAD` and `git status --porcelain` to see the actual changes; do not trust the implementer's summary. Apply the kiro-review protocol (.agents/skills/kiro-review/SKILL.md): check that the change implements this task's requirements and design, stays within the task's boundary (no unrelated files or other tasks' work), includes or updates the tests the task requires and that those tests were run, and introduces no regressions or placeholder code. Do not modify any files. End with exactly:
+Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read requirements.md, design.md and tasks.md yourself). Run `git diff <pre_head>..HEAD` to see the committed changes (that diff is the whole scope of this review); do not trust the implementer's summary. Apply the kiro-review protocol (.agents/skills/kiro-review/SKILL.md): check that the change implements this task's requirements and design, stays within the task's boundary (no unrelated files or other tasks' work), includes or updates the tests the task requires and that those tests were run, and introduces no regressions or placeholder code. Do not modify any files. End with exactly:
 ## Review Verdict
 - VERDICT: APPROVED | REJECTED
 - FINDINGS: <one line per finding, or "none">
 ```
 
 - `## Review Verdict` ブロックの `- VERDICT:` からだけ判定する（周囲の文章から推測しない）。判定が読めない場合は 1 回だけ再依頼し、それでも読めなければ REJECTED として扱う。
-- **APPROVED** → タスクを OK として記録する（tasks.md のチェックとコミットは実装エンジンが行ったものをそのまま使う）。
+- **APPROVED** → すぐには OK にしない。`kiro-verify-completion`（`.agents/skills/kiro-verify-completion/SKILL.md`）に従い、このセッション自身が**その場で新しく**対象プロジェクトの検証コマンド（リポジトリ固有のテストコマンド、無ければ `.claude/rules/unity-sdd.md` の既定。Unity 以外ならリポジトリの標準テストコマンド）を実行し、成功を確認してから OK として記録する（tasks.md のチェックとコミットは実装エンジンが行ったものをそのまま使う）。
+- 完了確認でテストが失敗した、または検証コマンドを実行できなかった場合は `FAIL (verify)` として記録し、REJECTED と同じく試行の開始時点に戻す（実行できなかった理由もサマリーに残す）。
 - **REJECTED** → タスクを `FAIL (review)` として記録し、指摘をサマリーに転記したうえで、Working Tree Baseline の手順でこの試行の開始時点に戻す（コミットは退避ブランチへ逃がす）。無人実行中に修正ループへは入らない。
 - レビュー実行自体が失敗・タイムアウトした場合も REJECTED と同じに扱う（未レビューの変更を残さない）。
 
@@ -201,7 +202,7 @@ After all tasks complete, display a summary table:
 
 | Task ID | Title | Engine | Result |
 |---------|-------|--------|--------|
-| ...     | ...   | codex / claude-fallback | OK/FAIL/FAIL (review)/TIMEOUT/SKIPPED/SKIPPED (blocked by X.Y) |
+| ...     | ...   | codex / claude-fallback | OK/FAIL/FAIL (review)/FAIL (verify)/TIMEOUT/SKIPPED/SKIPPED (blocked by X.Y) |
 
 サマリーテーブルの直後に **Validation Results** を必ず記載する:
 - validate-impl DECISION: <GO / NO-GO（内容の要約） / MANUAL_VERIFY_REQUIRED（不足している検証手順・環境前提） / SKIPPED（理由）>
