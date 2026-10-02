@@ -49,16 +49,37 @@ Then proceed IMMEDIATELY to task execution in the same turn. The only case where
 
 ## Working Tree Baseline（失敗したタスクの変更を後続へ持ち込まない）
 
-各タスクは `git add -A` でコミットするため、失敗したタスクの途中の変更が残っていると、次のタスクのコミットに混ざって帰属と検証が壊れる。これを防ぐため、次を必ず守る:
+各タスクは `git add -A` でコミットするため、失敗したタスクの途中の変更が残っていると、次のタスクのコミットや検証に混ざって帰属と検証が壊れる。git の追跡外（ignored）の設定ファイル（`.env` など）の書き換えも同様に後続へ残る。これを防ぐため、次を必ず守る。
 
-- **開始前**: `git status --porcelain` が空であることを確認する。未コミットの変更があれば実行を開始せず、その旨を報告して終了する（既存の変更を巻き込まないためのハードゲート。無人実行でも例外にしない）。
-- **各タスクの開始直前**: `pre_head=$(git rev-parse HEAD)` を記録する。
-- **タスクが OK 以外（FAIL / TIMEOUT）で終わったら**、次のタスクへ進む前に作業ツリーを `pre_head` の状態へ戻す。失敗したタスクの作業は捨てずに退避する:
-  1. 未コミットの変更があれば `git stash push -u -m "spec-run failed: <feature> <task_id>"`
-  2. HEAD が `pre_head` から進んでいれば `git branch "spec-run-failed/<feature>/<task_id>" HEAD` で退避してから `git reset --hard "$pre_head"`
-  3. 退避先（stash メッセージ / ブランチ名）をサマリーに記録する
-- **使用制限で claude -p にフォールバックする前**にも同じ手順で `pre_head` に戻す（codex の途中の変更をフォールバック実行に混ぜない）。
-- **OK のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。
+**開始前（1 回だけ）**
+
+```bash
+umask 077
+run_dir=$(mktemp -d)                       # この実行専用の私有ディレクトリ（ログ・退避物の置き場）
+run_id=$(date +%Y%m%d-%H%M%S)-$$           # 退避ブランチ名を実行ごとに一意にするための ID
+# 生成物（Unity の Library/Temp/Logs/obj/UserSettings やビルド出力）を除いた ignored ファイルの一覧
+gen_re='(^|/)(Library|Temp|Logs|obj|UserSettings|Builds?|MemoryCaptures|node_modules)/'
+git ls-files -o -i --exclude-standard -z | grep -zvE "$gen_re" > "$run_dir/ignored.list" || true
+tar --null -T "$run_dir/ignored.list" -cf "$run_dir/ignored-baseline.tar" 2>/dev/null || true
+(xargs -0 -r sha256sum < "$run_dir/ignored.list") > "$run_dir/ignored.sha256" 2>/dev/null || true
+```
+
+- `git status --porcelain` が空であることを確認する。未コミットの変更があれば実行を開始せず、その旨を報告して終了する（既存の変更を巻き込まないためのハードゲート。無人実行でも例外にしない）。
+- Bash ツールの呼び出し間でシェル変数は保持されないため、上で決まった `run_dir` / `run_id` の実際の値を以降のコマンドに埋め込んで使う（`pre_head` / `attempt` も同様）。
+- タスクのログは `$run_dir` の下に置く（例: `"$run_dir/codex-<attempt>.log"`）。共有の `/tmp` 固定パスは使わない。
+
+**各タスクの開始直前**: `pre_head=$(git rev-parse HEAD)` を記録し、試行番号 `attempt` を 1 つ進める（フォールバックも別の試行として数える）。
+
+**タスクが OK 以外（FAIL / TIMEOUT）で終わったとき、および使用制限で claude -p にフォールバックする前**は、次の手順で `pre_head` の状態へ戻す。失敗した作業は捨てずに退避する:
+
+1. 追跡対象・untracked の変更があれば `git stash push -u -m "spec-run failed: <feature> <task_id> (run $run_id, attempt $attempt)"`
+2. HEAD が `pre_head` から進んでいれば `git branch "spec-run-failed/$run_id/<feature>/<task_id>-$attempt" HEAD` で退避してから `git reset --hard "$pre_head"`
+3. ignored ファイルを開始時のスナップショットと比べる（`gen_re` に当たる生成物は対象外）。開始後に増えた・変わった ignored ファイルは `"$run_dir/failed-$attempt/"` へ移動して退避し、変更・削除されたものは `"$run_dir/ignored-baseline.tar"` から復元する
+4. 退避先（stash メッセージ / ブランチ名 / `$run_dir/failed-*`）をサマリーに記録する
+
+**OK のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。ignored ファイルが変わっていれば、意図した変更かどうかをサマリーで報告する。
+
+**終了時**: ログは不要になったら `$run_dir` ごと削除してよいが、退避物（`failed-*`）がある場合は残し、その場所をサマリーに明記する。
 
 ## Execute Tasks
 
@@ -67,7 +88,7 @@ Then proceed IMMEDIATELY to task execution in the same turn. The only case where
 ### Step 1: codex exec を試行（codex 利用可の場合のみ）
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox - <<'CODEX_EOF' 2>&1 | tee /tmp/codex-task-output.log
+codex exec --dangerously-bypass-approvals-and-sandbox - <<'CODEX_EOF' 2>&1 | tee "$run_dir/codex-$attempt.log"
 <codex_prompt>
 CODEX_EOF
 codex_exit=${PIPESTATUS[0]}
@@ -98,7 +119,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 使用制限シグネチャの検出（case-insensitive）:
 
 ```bash
-grep -iE 'rate.?limit|usage.?limit|quota|\b429\b|too many requests|exceeded your|try again later' /tmp/codex-task-output.log
+grep -iE 'rate.?limit|usage.?limit|quota|\b429\b|too many requests|exceeded your|try again later' "$run_dir/codex-$attempt.log"
 ```
 
 このパターンに該当しても誤検知の可能性はあるため、**判定は必ず「exit code 非ゼロ AND grep ヒット」の AND 条件**で行う。OK/FAIL が明示出力されているケースが優先。
@@ -166,4 +187,4 @@ Then suggest next steps:
 - If any FAIL/TIMEOUT: Review logs and fix issues manually, then re-run `/kiro:spec-run $1`（tasks.md の未チェックタスクだけが再実行される）
 - 連続失敗ガードで打ち切った場合: 打ち切り理由（直近の失敗ログの要点）を明記する
 - フォールバック発生回数を集計表示（例: `claude -p フォールバック: 2/15 タスク`）。常時フォールバックしている場合は Codex のクォータ確認を促す
-- 退避した失敗タスク（stash メッセージ / `spec-run-failed/...` ブランチ）を一覧表示し、内容を確認して不要なら削除するよう促す
+- 退避した失敗タスク（stash メッセージ / `spec-run-failed/<run_id>/...` ブランチ / `$run_dir/failed-*`）を一覧表示し、内容を確認して不要なら削除するよう促す
