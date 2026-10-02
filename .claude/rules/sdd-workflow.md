@@ -39,6 +39,7 @@ Kiro-style Spec-Driven Development on an agentic SDLC
   - `/kiro:validate-design {feature}` (optional: design review)
   - `/kiro:spec-tasks {feature} [-y]`
 - Phase 2 (Implementation): `/kiro:spec-impl {feature} [tasks]`
+  - Unattended batch: `/kiro:spec-run {feature}`; multiple specs in one queue: `/kiro:spec-run-multi {feature1} {feature2} ...`
   - `/kiro:validate-impl {feature}` (optional: after implementation)
 - Progress check: `/kiro:spec-status {feature}` (use anytime)
 
