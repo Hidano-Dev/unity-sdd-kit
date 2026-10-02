@@ -15,7 +15,8 @@
 ## Testing
 - Framework: Unity Test Framework (NUnit)
 - Prefer EditMode tests for logic; PlayMode only for frame / physics / input behavior
-- Run with Unity CLI: `unity test <project-dir> --mode EditMode` (and `--mode PlayMode`)
+- Editor executable: [path pinned to the `ProjectVersion.txt` version, if any]
+- Test command: [repository-specific command | `unity test <project-dir> --mode EditMode` (Unity CLI) | Unity Test Runner batchmode]
 - Keep MonoBehaviours thin; put logic in plain C# classes so it is testable in EditMode
 
 ## Assets & Serialization

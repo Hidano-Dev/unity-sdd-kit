@@ -43,7 +43,7 @@ Claude Code / Codex で回す **SDD（Spec-Driven Development、Kiro 方式の�
 `unity-sdd.md`（Claude）と `AGENTS.md` の「Unity Projects」節（Codex）で、次のことを定めています。
 
 - マルチプロジェクト構成を前提に、spec に対象プロジェクトのディレクトリを明記する。
-- 成功を主張する前に、**Unity CLI で EditMode（必要なら PlayMode）テストを実行する**（`unity test <プロジェクトディレクトリ> --mode EditMode`）。`SMOKE_COMMANDS` の既定もこれにする。
+- 成功を主張する前に、**EditMode（必要なら PlayMode）テストを実行する**。テストのコマンドは、リポジトリ固有の手順（CLAUDE.md / AGENTS.md / steering で Editor やテストコマンドを決めている場合）→ Unity CLI（`unity test <プロジェクトディレクトリ> --mode EditMode`）→ `ProjectVersion.txt` と同じ Editor での Unity Test Runner batchmode、の優先順で選び、`SMOKE_COMMANDS` の既定にもする。どの場合も、Editor のバージョンや `ProjectVersion.txt` は変えない。
 - シーン・プレハブ・アセットの YAML を手で編集しない（Editor が使えるなら Unity CLI 経由で変更する）。`.meta` の GUID は必ずランダムに生成する。
 - steering-custom の `unity.md` テンプレートで、プロジェクト構成・アセンブリ・テスト方針・アセットの扱いを記録する。
 
