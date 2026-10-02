@@ -166,7 +166,8 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 実装したエージェント自身の `OK` だけでタスクを成功扱いにしない。後続タスクが未レビューの変更を前提に進まないよう、**次のタスクへ進む前に**、実装とは別系統のエンジンでそのタスクの差分をレビューする:
 
-- レビューエンジン: 実装が codex なら `claude -p`、実装が claude（フォールバック）なら `codex exec`。どちらも使えない場合はこのセッション（オーケストレーター）自身がレビューする。
+- レビューエンジン: 実装が codex なら `claude -p`。実装が claude（使用制限によるフォールバック）の場合、Codex は制限中の可能性が高いので `codex exec` は使わず、このセッション（オーケストレーター）自身が実装とは独立にレビューする。どちらも使えない場合もこのセッション自身がレビューする。
+- レビュー実行が使用制限（Step 2 と同じシグネチャ）で失敗した場合は REJECTED にせず、このセッション自身のレビューに切り替えてやり直す（制限による失敗で正しい実装を巻き戻さない）。
 - レビュー対象: この試行で作られたコミット（`git diff "$pre_head"..HEAD`）**だけ**。レビューの前に、作業ツリーに未コミットの変更が残っていれば Working Tree Baseline の手順 1 で stash して「コミット漏れ」としてサマリーに記録し、レビューした内容とブランチに残る内容を一致させる（承認された変更を後から捨てることがないように）。
 - 実装者の報告: 実装エンジンの出力を保存した試行ログ（`$run_dir/codex-<attempt>.log` または `$run_dir/claude-<attempt>.log`）をレビュアーに渡す。kiro-review は behavioral task の `RED_PHASE_OUTPUT` を必須入力とするため、実装プロンプトでその出力を求めている。ログに `RED_PHASE_OUTPUT:` が無い behavioral task は、レビュアーの判定どおり REJECTED として扱う。
 
@@ -181,7 +182,7 @@ Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read req
 - **APPROVED** → すぐには OK にしない。`kiro-verify-completion`（`.agents/skills/kiro-verify-completion/SKILL.md`）に従い、このセッション自身が**その場で新しく**対象プロジェクトの検証コマンド（リポジトリ固有のテストコマンド、無ければ `.claude/rules/unity-sdd.md` の既定。Unity 以外ならリポジトリの標準テストコマンド）を実行し、成功を確認してから OK として記録する（tasks.md のチェックとコミットは実装エンジンが行ったものをそのまま使う）。
 - 完了確認でテストが失敗した、または検証コマンドを実行できなかった場合は `FAIL (verify)` として記録し、REJECTED と同じく試行の開始時点に戻す（実行できなかった理由もサマリーに残す）。
 - **REJECTED** → タスクを `FAIL (review)` として記録し、指摘をサマリーに転記したうえで、Working Tree Baseline の手順でこの試行の開始時点に戻す（コミットは退避ブランチへ逃がす）。無人実行中に修正ループへは入らない。
-- レビュー実行自体が失敗・タイムアウトした場合も REJECTED と同じに扱う（未レビューの変更を残さない）。
+- レビュー実行が使用制限以外の理由で失敗・タイムアウトした場合は REJECTED と同じに扱う（未レビューの変更を残さない）。
 
 ### Execution Rules
 
