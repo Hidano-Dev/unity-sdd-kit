@@ -1,19 +1,15 @@
-# 開発メモ
+# 開発メモ（unity-sdd-kit）
+
+このリポジトリは、Unity リポジトリ向けの SDD（仕様駆動開発）ワークフロー一式の**正本**。
+取り込み側リポジトリは `scripts/install.sh` で導入し、`SDD Sync` ワークフロー（`templates/consumer/sdd-sync.yml`）で追従する。
+
+- 配布物（`.claude/` `.agents/skills/kiro-*` `.codex/` `.kiro/settings/` `AGENTS.md`）の修正は必ずこのリポジトリで行う。取り込み側で直接直すと次回の同期で消える。
+- 配布物の範囲（kit が所有するパス）は `scripts/sync.sh` の `OWNED_DIRS` / `OWNED_FILES` / `SKILL_PREFIX` が正。パスを増減したら README の表も合わせて更新する。
+- Claude Code 向け（`.claude/commands/kiro/` `.claude/agents/kiro/`）と Codex 向け（`.agents/skills/kiro-*/` `AGENTS.md`）は同じワークフローの 2 系統なので、片方を直したらもう片方も揃える。Unity 向けのルールは `.claude/rules/unity-sdd.md` が正で、`AGENTS.md` の「Unity Projects」節はその要約。
+- `AGENTS.md` 先頭のマーカー行（`managed-by: unity-sdd-kit`）は消さない（取り込み側の同期判定に使う）。
+- `scripts/` を変えたら `bash tests/sync-test.sh` を通す（シンボリックリンクのテストは Linux 前提。Windows では CI の結果で確認する）。
+- Git 運用ルールと Linear 駆動の自律ワーカー（linear-worker）は [agentic-dev-harness](https://github.com/Hidano-Dev/agentic-dev-harness) の配布物で、このリポジトリには含めない。
 
 ## SDD ワークフロー
 
 @.claude/rules/sdd-workflow.md
-
-上記は [agentic-dev-harness](https://github.com/Hidano-Dev/agentic-dev-harness) から初期化時 (Template Init) / 同期時 (Orchestration Sync) に取り込まれる SDD ワークフローメモへの参照。テンプレートリポジトリ自体には実体が無いため、取り込み前は単に読み込まれない。
-
-## Unity Editor をコマンドラインで起動するとき
-
-CLI から Unity Editor を起動して自動化処理（ビルド、テスト、エージェント操作など）を行う場合は、**`-automated` フラグを付ける**。
-
-```
-"C:\Program Files\Unity\Hub\Editor\<バージョン>\Editor\Unity.exe" -projectPath "<プロジェクトディレクトリ>" -automated
-```
-
-- 未保存シーンの確認などの**ブロッキングダイアログが表示されなくなり**、各ダイアログの既定アクションが自動選択されるため、処理が途中で停止しない。
-- `-batchmode` と違い GUI ありの起動でも使える（Unity 6 系で確認）。
-- 注意: 「すべて OK が押される」のではなく**各ダイアログの既定動作**に従う。意図しない変更が起きる可能性があるため、自動化専用の起動にのみ付け、実行前に git がクリーンな状態であることを確認する。普段の手作業用 Editor には付けない。
