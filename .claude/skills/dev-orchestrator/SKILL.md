@@ -99,7 +99,8 @@ feature 名 / 解釈したスコープの要約（含む・含まない）/ 単�
 
 **Phase 5 の前処理**: 現在のブランチがデフォルトブランチ（main 等）の場合、実装コミットを
 直接積まないよう作業ブランチを作成して切り替えてから spec-run を実行する。ブランチ名は
-`.claude/rules/git-workflow.md` の命名規約に従う: `.kiro/orchestration/config.json` に Linear 連携
+`.claude/rules/git-workflow.md`（agentic-dev-harness を導入している場合）の命名規約に従う。
+規約は次のとおり: `.kiro/orchestration/config.json` に Linear 連携
 （`linear.team`）が設定されていれば `feature/<issue-id>-<feature-name>`（`<issue-id>` は対応する
 Linear Issue の識別子の小文字。未起票なら先に Linear へ起票する）とし、ブランチ作成後に Linear MCP で
 対応 Issue を In Progress に更新する（ローカルのブランチ作成は Linear に検知されず、push は Phase 6 まで

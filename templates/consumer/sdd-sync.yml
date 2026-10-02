@@ -1,0 +1,54 @@
+# =============================================================================
+# SDD 配布物の同期ワークフロー (取り込み側リポジトリに置く)
+# -----------------------------------------------------------------------------
+# 手動実行 (workflow_dispatch) で unity-sdd-kit の最新 main から SDD ワークフロー一式
+# (kiro commands / agents / skills、dev-orchestrator、.kiro/settings、
+#  sdd-workflow.md / unity-sdd.md、AGENTS.md) を取り込み直す。
+# 差分がある時だけ "chore: sync unity-sdd-kit assets" としてコミットする。
+#
+# - 同期の中身は unity-sdd-kit の scripts/sync.sh にある。このファイルは
+#   kit を clone してそれを呼ぶだけなので、通常は更新不要
+# - kit が所有するパスだけを扱い、所有ディレクトリは kit と同じ内容に揃える
+#   (kit で削除したファイルは消える)。.kiro/specs・.kiro/steering・
+#   .kiro/orchestration・自作 skill・agentic-dev-harness の配布物には触れない
+# - AGENTS.md は先頭にマーカーがあるものだけ上書きする。プロジェクト固有の
+#   追記をしたらマーカー行を消す
+# - ルート CLAUDE.md に @.claude/rules/sdd-workflow.md が無ければ追記する
+#
+# 配置先: .github/workflows/sdd-sync.yml
+# =============================================================================
+name: SDD Sync
+
+on:
+  workflow_dispatch:
+  # 定期的に追従したい場合は以下を有効化
+  # schedule:
+  #   - cron: '0 21 * * 0'   # 毎週月曜 06:00 JST
+
+env:
+  # 配布元 (unity-sdd-kit)
+  KIT_REPO: Hidano-Dev/unity-sdd-kit
+  KIT_REF: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync unity-sdd-kit assets
+        run: |
+          git clone --depth 1 --branch "$KIT_REF" --single-branch "https://github.com/${KIT_REPO}.git" /tmp/unity-sdd-kit
+          bash /tmp/unity-sdd-kit/scripts/sync.sh /tmp/unity-sdd-kit .
+          rm -rf /tmp/unity-sdd-kit
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: sync unity-sdd-kit assets"
+          git push

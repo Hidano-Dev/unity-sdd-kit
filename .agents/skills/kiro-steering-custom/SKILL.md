@@ -68,6 +68,7 @@ Templates available in `.kiro/settings/templates/steering-custom/`:
 5. **error-handling.md** - Error types, logging, retry strategies
 6. **authentication.md** - Auth flows, permissions, session management
 7. **deployment.md** - CI/CD, environments, rollback procedures
+8. **unity.md** - Unity project layout, assemblies, testing with Unity CLI, asset handling
 
 Load template when needed, customize for project.
 

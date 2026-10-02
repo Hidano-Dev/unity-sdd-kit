@@ -48,6 +48,7 @@ Show Subagent summary to user:
 Available templates in `.kiro/settings/templates/steering-custom/`:
 - api-standards.md, testing.md, security.md, database.md
 - error-handling.md, authentication.md, deployment.md
+- unity.md (Unity projects: layout, assemblies, Unity CLI testing, asset handling)
 
 ## Notes
 

@@ -1,4 +1,4 @@
-<!-- managed-by: agentic-dev-harness — このファイルは Harness Sync / Onboard Repository で上書きされる。プロジェクト固有の追記をする場合はこの行を削除すると同期対象から外れる -->
+<!-- managed-by: unity-sdd-kit — このファイルは SDD Sync / unity-sdd-kit の install.sh で上書きされる。プロジェクト固有の追記をする場合はこの行を削除すると同期対象から外れる -->
 
 # Agentic SDLC and Spec-Driven Development
 
@@ -85,3 +85,10 @@ Skills with "Parallel Research" sections list independent work items that benefi
 - Load entire `.kiro/steering/` as project memory
 - Default files: `product.md`, `tech.md`, `structure.md`
 - Custom files are supported (managed via `$kiro-steering-custom`)
+
+## Unity Projects
+Applies only when the repository contains Unity projects. Full rules: `.claude/rules/unity-sdd.md` (read it before writing Unity specs or implementing Unity tasks).
+- Repositories generated from unity-project-template are multi-project: each top-level directory with `ProjectSettings/ProjectVersion.txt` is a Unity project. Name the target project directory in requirements, design and tasks.
+- Drive Unity through the Unity CLI (`unity`); see the `unity-cli` skill in `.agents/skills/unity-cli/`. Editor control needs the `com.unity.pipeline` package in the project.
+- Before claiming completion, run the project's tests with `unity test <project-dir> --mode EditMode` (and `--mode PlayMode` when the task has PlayMode tests). Use this as the default `SMOKE_COMMANDS` / verification command. If an Editor already has the project open, close it first or use `unity command` against the running Editor.
+- Do not hand-edit scene / prefab / asset YAML; change them through the running Editor (`unity command eval '<C#>'`) or generate them from code. When writing a `.meta` file by hand, generate a fresh random 32-hex GUID (never a patterned or reused one).
