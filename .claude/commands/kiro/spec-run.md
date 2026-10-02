@@ -134,7 +134,7 @@ grep -iE 'rate.?limit|usage.?limit|quota|\b429\b|too many requests|exceeded your
 
 ```bash
 unset CLAUDECODE && echo "" | claude -p "<claude_prompt>" --max-turns 60 --enable-auto-mode --verbose 2>&1 | tee "$run_dir/claude-$attempt.log"
-claude_exit=${PIPESTATUS[0]}   # tee ではなく claude 自身の終了コードで判定する
+claude_exit=${PIPESTATUS[1]}   # echo | claude | tee の 2 番目 = claude 自身の終了コードで判定する
 ```
 
 > **Note:** `unset CLAUDECODE` は親セッション（このスクリプトを呼んでいる claude）からのネスト起動を許可するため。
@@ -156,7 +156,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 実装したエージェント自身の `OK` だけでタスクを成功扱いにしない。後続タスクが未レビューの変更を前提に進まないよう、**次のタスクへ進む前に**、実装とは別系統のエンジンでそのタスクの差分をレビューする:
 
 - レビューエンジン: 実装が codex なら `claude -p`。実装が claude（使用制限によるフォールバック）の場合、Codex は制限中の可能性が高いので `codex exec` は使わず、このセッション（オーケストレーター）自身が実装とは独立にレビューする。どちらも使えない場合もこのセッション自身がレビューする。
-- `claude -p` でレビューする場合は、フォールバック実行と同じくネスト起動の保護を解除して起動し、出力を試行ログとは別に保存する: `unset CLAUDECODE && echo "" | claude -p "<review_prompt>" --max-turns 30 --verbose 2>&1 | tee "$run_dir/review-$attempt.log"`（終了コードは `${PIPESTATUS[0]}` で取る）。`codex exec` でレビューする場合も同様に `"$run_dir/review-$attempt.log"` へ保存する。
+- `claude -p` でレビューする場合は、フォールバック実行と同じくネスト起動の保護を解除して起動し、出力を試行ログとは別に保存する: `unset CLAUDECODE && echo "" | claude -p "<review_prompt>" --max-turns 30 --verbose 2>&1 | tee "$run_dir/review-$attempt.log"`（終了コードは claude が 2 番目のコマンドなので `${PIPESTATUS[1]}` で取る）。`codex exec` でレビューする場合も同様に `"$run_dir/review-$attempt.log"` へ保存する。
 - レビュー実行が使用制限（Step 2 と同じシグネチャ）で失敗した場合は REJECTED にせず、このセッション自身のレビューに切り替えてやり直す（制限による失敗で正しい実装を巻き戻さない）。
 - レビュー対象: この試行で作られたコミット（`git diff "$pre_head"..HEAD`）**だけ**。レビューの前に、作業ツリーに未コミットの変更が残っていれば Working Tree Baseline の手順 1 で stash して「コミット漏れ」としてサマリーに記録し、レビューした内容とブランチに残る内容を一致させる（承認された変更を後から捨てることがないように）。
 - 実装者の報告: 実装エンジンの出力を保存した試行ログ（`$run_dir/codex-<attempt>.log` または `$run_dir/claude-<attempt>.log`）をレビュアーに渡す。kiro-review は behavioral task の `RED_PHASE_OUTPUT` を必須入力とするため、実装プロンプトでその出力を求めている。ログに `RED_PHASE_OUTPUT:` が無い behavioral task は、レビュアーの判定どおり REJECTED として扱う。
