@@ -134,6 +134,7 @@ grep -iE 'rate.?limit|usage.?limit|quota|\b429\b|too many requests|exceeded your
 
 ```bash
 unset CLAUDECODE && echo "" | claude -p "<claude_prompt>" --max-turns 60 --enable-auto-mode --verbose 2>&1 | tee "$run_dir/claude-$attempt.log"
+claude_exit=${PIPESTATUS[0]}   # tee ではなく claude 自身の終了コードで判定する
 ```
 
 > **Note:** `unset CLAUDECODE` は親セッション（このスクリプトを呼んでいる claude）からのネスト起動を許可するため。
@@ -146,7 +147,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 フォールバック後の結果判定:
 - 出力末尾の `OK` / `FAIL` で判定。`OK` の場合も Step 4 の独立レビューを通す。
-- exit code 非ゼロ → FAIL 扱い。
+- `claude_exit` が非ゼロ → FAIL 扱い。
 - タイムアウト → TIMEOUT 扱い。
 - claude 側でも使用制限を踏んだ場合は FAIL として記録し、自動的に次のタスクへ進む（さらなるフォールバック先は無い。連続失敗ガードに委ねる）。
 
