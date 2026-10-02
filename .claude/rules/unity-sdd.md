@@ -32,9 +32,11 @@ unity-sdd-kit が配布する、Unity プロジェクト向けの追加ルール
      ```
      <Unity.exe> -batchmode -nographics -projectPath <プロジェクトディレクトリ> -runTests -testPlatform EditMode -testResults <絶対パス>.xml -logFile <絶対パス>.log
      ```
-- 同じプロジェクトを開いている Editor があると batch 起動のテスト（`unity test` / `-batchmode`）はプロジェクトロックで失敗する。`unity status` で接続中の Editor を確認し、開いているなら閉じてから実行するか、Editor 側のコマンド（`unity command`）で代替する。
-- `unity status` / `unity command` が Editor に繋がらないときは、コンパイルエラーで Safe Mode になっていないかを `unity pipeline list` で確認し、エラーを直す。ファイルの手編集に逃げない。
-- CLI から Editor を GUI 付きで起動する場合は `-automated` を渡す（`unity open <プロジェクトディレクトリ> --args "-automated"`）。ブロッキングダイアログで処理が止まらなくなる。
+- 同じプロジェクトを開いている Editor があると batch 起動のテスト（`unity test` / `-batchmode`）はプロジェクトロックで失敗する（ログに別インスタンスが開いている旨が出る）。
+  - Unity CLI が使える場合: `unity status` で接続中の Editor を確認し、開いているなら閉じてから実行するか、Editor 側のコマンド（`unity command`）で代替する。`unity status` / `unity command` が Editor に繋がらないときは、コンパイルエラーで Safe Mode になっていないかを `unity pipeline list` で確認し、エラーを直す。
+  - Unity CLI が使えない場合: 対象プロジェクトを開いている Unity Editor のプロセスがあるかを確認する（Windows: `Get-Process Unity`、macOS / Linux: `pgrep -fl Unity`）。人が作業中の Editor を勝手に終了させず、閉じてもらうよう依頼するか、検証を `MANUAL_VERIFY_REQUIRED` として報告する。
+  - どちらの場合も、テストが走らないことを理由にファイルの手編集や検証の省略に逃げない。
+- Editor を GUI 付きで自動化目的に起動する場合は `-automated` を渡す（Unity CLI なら `unity open <プロジェクトディレクトリ> --args "-automated"`、Unity.exe を直接起動するなら引数に追加）。ブロッキングダイアログで処理が止まらなくなる。
 
 ## Unity アセットの扱い
 
