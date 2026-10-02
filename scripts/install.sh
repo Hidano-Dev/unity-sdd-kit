@@ -42,9 +42,23 @@ else
 fi
 trap '[ -n "$CLEANUP" ] && rm -rf "$CLEANUP"' EXIT
 
+WF_REL=".github/workflows/sdd-sync.yml"
+WF="$TARGET/$WF_REL"
+
+# 同期ワークフローの配置先 (途中のディレクトリを含む) がリンクだとリポジトリ外へ書き込むので、
+# 何かを書き換える前に検査して中止する
+cur="$TARGET"
+IFS='/' read -r -a parts <<< "$WF_REL"
+for part in "${parts[@]}"; do
+  cur="$cur/$part"
+  if [ -L "$cur" ]; then
+    echo "error: ${cur#"$TARGET"/} がシンボリックリンクのため中止しました (通常のファイル・ディレクトリにしてから再実行してください)" >&2
+    exit 1
+  fi
+done
+
 bash "$KIT/scripts/sync.sh" "$KIT" "$TARGET"
 
-WF="$TARGET/.github/workflows/sdd-sync.yml"
 if [ -e "$WF" ]; then
   echo "既存の .github/workflows/sdd-sync.yml を維持しました"
 else

@@ -53,8 +53,13 @@ kit_skills=""
 for d in "$KIT/$SKILLS_DIR/$SKILL_PREFIX"*/; do
   [ -d "$d" ] && kit_skills="$kit_skills $(basename "$d")"
 done
-check_paths="$OWNED_DIRS $OWNED_FILES AGENTS.md CLAUDE.md"
+check_paths="$OWNED_DIRS $OWNED_FILES AGENTS.md CLAUDE.md $SKILLS_DIR"
 for s in $kit_skills; do check_paths="$check_paths $SKILLS_DIR/$s"; done
+# 取り込み側にだけ残っている古い kiro-* も削除対象なので検査に含める
+# (リンクのまま rm すると、末尾 / 付きの場合などにリンク先の中身を消しかねない)
+for e in "$TARGET/$SKILLS_DIR/$SKILL_PREFIX"*; do
+  { [ -e "$e" ] || [ -L "$e" ]; } && check_paths="$check_paths $SKILLS_DIR/$(basename "$e")"
+done
 bad=""
 for p in $check_paths; do
   # 途中のディレクトリがリンクでも書き込みが外へ出るので、各構成要素を見る
@@ -96,20 +101,24 @@ done
 # kiro- で始まる skill は kit 所有。kit に無いものは削除し、kit のものは揃える。
 # それ以外の skill (unity-cli など) には触れない。
 mkdir -p "$TARGET/$SKILLS_DIR"
-for existing in "$TARGET/$SKILLS_DIR/$SKILL_PREFIX"*/; do
-  [ -d "$existing" ] || continue
+for existing in "$TARGET/$SKILLS_DIR/$SKILL_PREFIX"*; do
+  { [ -e "$existing" ] || [ -L "$existing" ]; } || continue
   name=$(basename "$existing")
-  [ -d "$KIT/$SKILLS_DIR/$name" ] || rm -rf "$existing"
+  [ -d "$KIT/$SKILLS_DIR/$name" ] || rm -rf "${TARGET:?}/$SKILLS_DIR/$name"
 done
 for s in $kit_skills; do
   rm -rf "${TARGET:?}/$SKILLS_DIR/$s"
   cp -R "$KIT/$SKILLS_DIR/$s" "$TARGET/$SKILLS_DIR/$s"
 done
 
-# ── AGENTS.md (マーカー付き、または未作成のときだけ) ────────────────
+# ── AGENTS.md (先頭行にマーカーがある、または未作成のときだけ) ─────────
+# 判定は先頭行だけで行う。先頭のマーカー行を消せば同期対象から外れる契約なので、
+# 本文中にマーカー文字列が残っていても独自ファイルとして扱う
+agents_head=""
+[ -f "$TARGET/AGENTS.md" ] && agents_head=$(head -n 1 "$TARGET/AGENTS.md")
 if [ ! -f "$TARGET/AGENTS.md" ] \
-  || grep -qF "$AGENTS_MD_MARKER" "$TARGET/AGENTS.md" \
-  || grep -qF "$AGENTS_MD_LEGACY_MARKER" "$TARGET/AGENTS.md"; then
+  || printf '%s' "$agents_head" | grep -qF "$AGENTS_MD_MARKER" \
+  || printf '%s' "$agents_head" | grep -qF "$AGENTS_MD_LEGACY_MARKER"; then
   cp "$KIT/AGENTS.md" "$TARGET/AGENTS.md"
 else
   echo "::notice::AGENTS.md にマーカー ($AGENTS_MD_MARKER) が無いため独自ファイルとみなし、上書きしません"

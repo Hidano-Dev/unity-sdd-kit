@@ -29,6 +29,7 @@ commit_all() { git -C "$1" add -A && git -C "$1" -c user.name=t -c user.email=t@
 has_marker() { head -n 1 "$1" | grep -qF "managed-by: unity-sdd-kit"; }
 is_empty_dir() { [ -z "$(find "$1" -mindepth 1 -print -quit)" ]; }
 sync_fails() { ! bash "$KIT/scripts/sync.sh" "$KIT" "$1" >/dev/null 2>&1; }
+install_fails() { ! bash "$KIT/scripts/install.sh" "$1" >/dev/null 2>&1; }
 
 # 1. 新規導入: 配布物・同期ワークフロー・CLAUDE.md の import 行
 T=$(new_target fresh)
@@ -55,6 +56,9 @@ check "legacy-marker AGENTS.md replaced" has_marker "$T/AGENTS.md"
 printf 'my own\n' > "$T/AGENTS.md"
 bash "$KIT/scripts/sync.sh" "$KIT" "$T" >/dev/null
 check "custom AGENTS.md kept" test "$(cat "$T/AGENTS.md")" = "my own"
+printf '# my own\nsee managed-by: unity-sdd-kit for the original\n' > "$T/AGENTS.md"
+bash "$KIT/scripts/sync.sh" "$KIT" "$T" >/dev/null
+check "marker only in body is not managed" test "$(head -n 1 "$T/AGENTS.md")" = "# my own"
 
 # 4. 所有パスの古いファイルは消え、所有外 (.kiro/steering など) は残る
 mkdir -p "$T/.agents/skills/kiro-obsolete" "$T/.kiro/steering" "$T/.kiro/orchestration"
@@ -81,5 +85,21 @@ mkdir -p "$WORK/outside2"
 ln -s "$WORK/outside2" "$T/.claude"
 check "symlinked parent rejected" sync_fails "$T"
 check "nothing written through parent symlink" is_empty_dir "$WORK/outside2"
+
+# 取り込み側にだけ残っている古い kiro-* がリンクなら、リンク先を消さずに中止
+T=$(new_target stale-skill-link)
+mkdir -p "$WORK/outside3" "$T/.agents/skills"
+echo precious > "$WORK/outside3/keep.txt"
+ln -s "$WORK/outside3" "$T/.agents/skills/kiro-obsolete"
+check "stale kiro symlink rejected" sync_fails "$T"
+check "stale kiro symlink target intact" test -f "$WORK/outside3/keep.txt"
+
+# 同期ワークフローの配置先がリンクなら、install.sh は何も書かずに中止
+T=$(new_target workflow-link)
+mkdir -p "$WORK/outside4"
+ln -s "$WORK/outside4" "$T/.github"
+check "symlinked .github rejected by install" install_fails "$T"
+check "nothing written through .github symlink" is_empty_dir "$WORK/outside4"
+check "nothing synced before install abort" test ! -e "$T/.claude"
 
 exit $FAILED
