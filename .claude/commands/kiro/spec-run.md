@@ -47,6 +47,19 @@ Before starting, display the execution plan in one message (informational only):
 
 Then proceed IMMEDIATELY to task execution in the same turn. The only case where you stop before execution is a hard validation failure (missing spec directory / tasks.md, or zero unchecked tasks).
 
+## Working Tree Baseline（失敗したタスクの変更を後続へ持ち込まない）
+
+各タスクは `git add -A` でコミットするため、失敗したタスクの途中の変更が残っていると、次のタスクのコミットに混ざって帰属と検証が壊れる。これを防ぐため、次を必ず守る:
+
+- **開始前**: `git status --porcelain` が空であることを確認する。未コミットの変更があれば実行を開始せず、その旨を報告して終了する（既存の変更を巻き込まないためのハードゲート。無人実行でも例外にしない）。
+- **各タスクの開始直前**: `pre_head=$(git rev-parse HEAD)` を記録する。
+- **タスクが OK 以外（FAIL / TIMEOUT）で終わったら**、次のタスクへ進む前に作業ツリーを `pre_head` の状態へ戻す。失敗したタスクの作業は捨てずに退避する:
+  1. 未コミットの変更があれば `git stash push -u -m "spec-run failed: <feature> <task_id>"`
+  2. HEAD が `pre_head` から進んでいれば `git branch "spec-run-failed/<feature>/<task_id>" HEAD` で退避してから `git reset --hard "$pre_head"`
+  3. 退避先（stash メッセージ / ブランチ名）をサマリーに記録する
+- **使用制限で claude -p にフォールバックする前**にも同じ手順で `pre_head` に戻す（codex の途中の変更をフォールバック実行に混ぜない）。
+- **OK のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。
+
 ## Execute Tasks
 
 各タスクについて以下の流れで実行する:
@@ -78,7 +91,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 1. **codex 出力末尾に `OK`** → タスク成功（OK として記録、次のタスクへ）
 2. **codex 出力末尾に `FAIL`** → タスク失敗（FAIL として記録、自動的に次のタスクへ）
-3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Step 3 へフォールバック
+3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Working Tree Baseline の手順で `pre_head` に戻してから Step 3 へフォールバック
 4. **codex_exit が非ゼロ かつ シグネチャ無し** → 通常の実行失敗（FAIL として記録、自動的に次のタスクへ）
 5. **タイムアウト（30 分）** → TIMEOUT として記録、自動的に次のタスクへ
 
@@ -115,7 +128,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
-- **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録して自動的に次のタスクへ進む
+- **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録し、Working Tree Baseline の手順で `pre_head` に戻して（作業は退避して）から自動的に次のタスクへ進む
 - ただし **3 タスク連続で FAIL/TIMEOUT** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスクを SKIPPED として記録してサマリーへ進む
 - 途中のタスクが FAIL でも後続タスクは独立して試行する（依存で連鎖失敗する場合は上記の連続失敗ガードで止まる）
 
@@ -153,3 +166,4 @@ Then suggest next steps:
 - If any FAIL/TIMEOUT: Review logs and fix issues manually, then re-run `/kiro:spec-run $1`（tasks.md の未チェックタスクだけが再実行される）
 - 連続失敗ガードで打ち切った場合: 打ち切り理由（直近の失敗ログの要点）を明記する
 - フォールバック発生回数を集計表示（例: `claude -p フォールバック: 2/15 タスク`）。常時フォールバックしている場合は Codex のクォータ確認を促す
+- 退避した失敗タスク（stash メッセージ / `spec-run-failed/...` ブランチ）を一覧表示し、内容を確認して不要なら削除するよう促す

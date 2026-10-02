@@ -59,6 +59,19 @@ Container task（サブタスクを持つ親タスク）はスキップし、lea
 
 表示したら、同じターンのまま直ちにタスク実行へ進む。実行前に止まるのは、検証の結果として実行可能な spec が 1 つ以下になった場合と、全 spec で未完了タスクがゼロの場合だけ。
 
+## Working Tree Baseline（失敗したタスクの変更を後続へ持ち込まない）
+
+各タスクは `git add -A` でコミットするため、失敗したタスクの途中の変更が残っていると、次のタスクのコミットに混ざって帰属と検証が壊れる。これを防ぐため、次を必ず守る:
+
+- **開始前**: `git status --porcelain` が空であることを確認する。未コミットの変更があれば実行を開始せず、その旨を報告して終了する（既存の変更を巻き込まないためのハードゲート。無人実行でも例外にしない）。
+- **各タスクの開始直前**: `pre_head=$(git rev-parse HEAD)` を記録する。
+- **タスクが OK 以外（FAIL / TIMEOUT）で終わったら**、次のタスクへ進む前に作業ツリーを `pre_head` の状態へ戻す。失敗したタスクの作業は捨てずに退避する:
+  1. 未コミットの変更があれば `git stash push -u -m "spec-run failed: <feature> <task_id>"`
+  2. HEAD が `pre_head` から進んでいれば `git branch "spec-run-failed/<feature>/<task_id>" HEAD` で退避してから `git reset --hard "$pre_head"`
+  3. 退避先（stash メッセージ / ブランチ名）をサマリーに記録する
+- **使用制限で claude -p にフォールバックする前**にも同じ手順で `pre_head` に戻す（codex の途中の変更をフォールバック実行に混ぜない）。
+- **OK のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。
+
 ## Execute Tasks
 
 統合タスクリストを順次（並列ではなく）に処理する。各タスクの実行手順:
@@ -90,7 +103,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 1. **codex 出力末尾に `OK`** → タスク成功（OK として記録、次のタスクへ）
 2. **codex 出力末尾に `FAIL`** → タスク失敗（FAIL として記録、自動的に次のタスクへ）
-3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Step 3 へフォールバック
+3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Working Tree Baseline の手順で `pre_head` に戻してから Step 3 へフォールバック
 4. **codex_exit が非ゼロ かつ シグネチャ無し** → 通常の実行失敗（FAIL として記録、自動的に次のタスクへ）
 5. **タイムアウト（30 分）** → TIMEOUT として記録、自動的に次のタスクへ
 
@@ -128,7 +141,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which spec / engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
-- **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録して自動的に次のタスクへ進む
+- **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録し、Working Tree Baseline の手順で `pre_head` に戻して（作業は退避して）から自動的に次のタスクへ進む
 - ただし **3 タスク連続で FAIL/TIMEOUT** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスク（後続 spec を含む）を SKIPPED として記録して実装検証へ進む
 - spec の境界をまたいでも処理は連続する（spec1 の途中で FAIL しても spec1 の残り → spec2 へ進む）
 
@@ -170,4 +183,5 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - FAIL/TIMEOUT がある場合: 対象 spec とタスクを列挙し、ログ確認 + 手動修正のうえ `/kiro:spec-run <feature>`（単一 spec）または本コマンドで再実行するよう勧める（tasks.md の未チェックタスクだけが再実行される）
 - 連続失敗ガードで打ち切った場合: 打ち切り理由（直近の失敗ログの要点）を明記する
 - フォールバック発生回数を集計表示（例: `claude -p フォールバック: 2/38 タスク`）。常時フォールバックしている場合は Codex のクォータ確認を促す
+- 退避した失敗タスク（stash メッセージ / `spec-run-failed/...` ブランチ）を一覧表示し、内容を確認して不要なら削除するよう促す
 - spec 単位の小計（spec1: 19/19 OK, spec2: 18/19 OK 1 FAIL 等）も表示する
