@@ -1,6 +1,6 @@
 ---
-description: Run all pending spec tasks ACROSS MULTIPLE specs sequentially via codex exec, with automatic fallback to claude -p on Codex usage-limit. Concatenates each spec's tasks into one queue and processes them in declared order.
-allowed-tools: Read, Bash, Glob, Grep
+description: Run all pending spec tasks ACROSS MULTIPLE specs sequentially via codex exec, with automatic fallback to claude -p on Codex usage-limit, then run validate-impl for each spec. Concatenates each spec's tasks into one queue and processes them in declared order (unattended batch execution — starts immediately without confirmation)
+allowed-tools: Read, Bash, Glob, Grep, SlashCommand
 argument-hint: <feature-name-1> <feature-name-2> [feature-name-3] ...
 ---
 
@@ -45,17 +45,19 @@ Container task（サブタスクを持つ親タスク）はスキップし、lea
 
 各タスクは `<feature_name> <task_id> <task_title>` の形式で 1 行に整形する。
 
-## Confirm with User
+## Announce and Start Immediately
 
-統合タスクリストを表示し、ユーザーに実行確認を求める。
+**ユーザーに確認しない。入力も待たない。** `/kiro:spec-run` と同じく無人（放置・夜間）実行を前提とし、このコマンドを起動したこと自体を実行の承認とみなす。
 
-表示内容:
+実行前に、統合タスクリストを 1 回だけ表示する（情報提示のみ）:
 - 対象 spec 名（複数）と各 spec のタスク件数
 - 全タスク件数（連結後）
 - タスク一覧（`<feature> <id> <title>` 形式、宣言順）
 - 推定アプローチ: per-task に codex exec → 使用制限検知時のみ claude -p へフォールバック（タスクごとにリセット）。各実行 30 分タイムアウト
 - Codex 利用可否（`codex --version` の結果）
 - 注意: 「Unity Editor が起動している場合は、batchmode テスト実行で競合する可能性があるため Editor を閉じてから実行することを推奨」
+
+表示したら、同じターンのまま直ちにタスク実行へ進む。実行前に止まるのは、検証の結果として実行可能な spec が 1 つ以下になった場合と、全 spec で未完了タスクがゼロの場合だけ。
 
 ## Execute Tasks
 
@@ -87,10 +89,10 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 判定の優先順位（`/kiro:spec-run` と同等）:
 
 1. **codex 出力末尾に `OK`** → タスク成功（OK として記録、次のタスクへ）
-2. **codex 出力末尾に `FAIL`** → タスク失敗（FAIL として記録、ユーザーに継続確認）
+2. **codex 出力末尾に `FAIL`** → タスク失敗（FAIL として記録、自動的に次のタスクへ）
 3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Step 3 へフォールバック
-4. **codex_exit が非ゼロ かつ シグネチャ無し** → 通常の実行失敗（FAIL として記録、ユーザーに継続確認）
-5. **タイムアウト（30 分）** → TIMEOUT として記録、ユーザーに継続確認
+4. **codex_exit が非ゼロ かつ シグネチャ無し** → 通常の実行失敗（FAIL として記録、自動的に次のタスクへ）
+5. **タイムアウト（30 分）** → TIMEOUT として記録、自動的に次のタスクへ
 
 使用制限シグネチャの検出（case-insensitive）:
 
@@ -118,7 +120,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - 出力末尾の `OK` / `FAIL` で判定。
 - exit code 非ゼロ → FAIL 扱い。
 - タイムアウト → TIMEOUT 扱い。
-- claude 側でも使用制限を踏んだ場合は素直に FAIL/エラーとして報告し、ユーザーに継続確認する（さらなるフォールバック先は無い）。
+- claude 側でも使用制限を踏んだ場合は FAIL として記録し、自動的に次のタスクへ進む（さらなるフォールバック先は無い。連続失敗ガードに委ねる）。
 
 ### Execution Rules
 
@@ -126,19 +128,46 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which spec / engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
-- If a task fails or times out, ask the user whether to continue with the remaining tasks or stop
-- spec の境界をまたいでも処理は連続する（spec1 の途中で FAIL してもユーザーが続行を選べば spec1 の残り → spec2 へ進む）
+- **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録して自動的に次のタスクへ進む
+- ただし **3 タスク連続で FAIL/TIMEOUT** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスク（後続 spec を含む）を SKIPPED として記録して実装検証へ進む
+- spec の境界をまたいでも処理は連続する（spec1 の途中で FAIL しても spec1 の残り → spec2 へ進む）
+
+## Validate Implementation
+
+タスク実行ループが終わったら（打ち切り含む）、**ユーザーに確認せず**、引数の宣言順に **spec ごとに** 実装検証を実行する:
+
+```
+/kiro:validate-impl <feature>
+```
+
+実行条件と扱い（`/kiro:spec-run` と同じ）:
+- **その spec に 1 つでも OK のタスクがあれば必ず 1 回実行する**（部分成功でも、できた分の実装を検証する価値があるため）
+- その spec の OK がゼロ（全 FAIL/TIMEOUT/SKIPPED）の場合は実行せず、`SKIPPED (no completed tasks)` として記録
+- **この検証はソフトゲート**: コマンドがプロジェクトに存在しない・エラーになった場合は `SKIPPED` として理由を記録し、次の spec の検証へ進む。検証で問題が報告されても自動修正は試みない — 指摘内容をサマリーに転記するだけに留める（無人実行中に検証起点の修正ループへ入らない）
+- **判定の記録**: validate-impl の DECISION（`GO` / `NO-GO` / `MANUAL_VERIFY_REQUIRED`）を spec ごとにそのまま記録する。`MANUAL_VERIFY_REQUIRED` は「重大な指摘なし」ではなく**独立した非通過結果**であり、GO に丸めない。不足している検証手順・環境前提もあわせて転記する
+- タスクが OK でも、実装者自身の OK だけで spec を成功扱いにしない。spec の成否は validate-impl の DECISION で判断する
+- サブコマンド出力内の「次のステップ」案内は無視する
 
 ## Summary
 
-全タスク完了後、以下のサマリ表を表示する:
+全タスクと検証の完了後、以下のサマリ表を表示する:
 
 | Spec | Task ID | Title | Engine | Result |
 |------|---------|-------|--------|--------|
-| ...  | ...     | ...   | codex / claude-fallback | OK/FAIL/TIMEOUT |
+| ...  | ...     | ...   | codex / claude-fallback | OK/FAIL/TIMEOUT/SKIPPED |
+
+サマリーテーブルの直後に、spec ごとの **Validation Results** を必ず記載する:
+
+| Spec | Tasks | validate-impl DECISION | 指摘事項 |
+|------|-------|------------------------|----------|
+| ...  | 19/19 OK | GO / NO-GO（要約） / MANUAL_VERIFY_REQUIRED（不足している検証手順・環境前提） / SKIPPED（理由） | ... |
+
+- GO 以外はいずれも**非通過**として扱う（呼び出し元のゲート判定に DECISION をそのまま伝える。MANUAL_VERIFY_REQUIRED を「指摘なし」扱いにしない）
 
 その後、次のステップを提案する:
-- すべての spec で全タスク OK の場合: 各 spec に対し `/kiro:validate-impl <feature>` で実装検証を勧める
-- 一部 FAIL の場合: 対象 spec とタスクを列挙し、ログ確認 + 手動修正 + 再実行を勧める
+- 全 spec が全タスク OK かつ validate-impl GO の場合: 実装完了。指摘事項があればそのレビューを促す
+- MANUAL_VERIFY_REQUIRED の spec がある場合: 完了扱いにせず、不足している検証手順を明示して手動検証を促す
+- FAIL/TIMEOUT がある場合: 対象 spec とタスクを列挙し、ログ確認 + 手動修正のうえ `/kiro:spec-run <feature>`（単一 spec）または本コマンドで再実行するよう勧める（tasks.md の未チェックタスクだけが再実行される）
+- 連続失敗ガードで打ち切った場合: 打ち切り理由（直近の失敗ログの要点）を明記する
 - フォールバック発生回数を集計表示（例: `claude -p フォールバック: 2/38 タスク`）。常時フォールバックしている場合は Codex のクォータ確認を促す
 - spec 単位の小計（spec1: 19/19 OK, spec2: 18/19 OK 1 FAIL 等）も表示する
