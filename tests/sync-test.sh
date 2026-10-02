@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# check() 経由で間接的に呼ぶ関数を shellcheck が到達不能と誤検出するため無効化
+# shellcheck disable=SC2317
 # =============================================================================
 # scripts/sync.sh / scripts/install.sh の回帰テスト
 # 使い方: bash tests/sync-test.sh   (kit のルートで実行。CI では Linux で回す)
