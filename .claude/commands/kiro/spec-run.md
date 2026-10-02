@@ -109,7 +109,7 @@ codex_exit=${PIPESTATUS[0]}
 `<codex_prompt>` は以下:
 
 ```
-Execute only this single task (<task_id> <task_title>) according to the instructions in AGENTS.md (auto-loaded by Codex) and the spec documents in .kiro/specs/$1/ (requirements.md, design.md, tasks.md). Before starting, output the task name (<task_id> <task_title>). After completing the task, run UnityTestRunner to verify the result. If any file changes exist, run git add -A and then commit. The commit title must be the task name "<task_id> <task_title>" as-is. The commit body must contain a brief summary of what was done (files created/modified, key changes). Use a multi-line commit message with git commit -m "title" -m "body". Finally, output only OK or FAIL. tasks.txt is a user-managed file and must not be modified. After outputting OK or FAIL, complete the session without waiting for user input.
+Execute only this single task (<task_id> <task_title>) according to the instructions in AGENTS.md (auto-loaded by Codex) and the spec documents in .kiro/specs/$1/ (requirements.md, design.md, tasks.md). Before starting, output the task name (<task_id> <task_title>). After completing the task, run UnityTestRunner to verify the result. If any file changes exist, run git add -A and then commit. The commit title must be the task name "<task_id> <task_title>" as-is. The commit body must contain a brief summary of what was done (files created/modified, key changes). Use a multi-line commit message with git commit -m "title" -m "body". Before implementing behavior, write or update the tests first and run them to confirm they fail; before the final line, print a section that starts with "RED_PHASE_OUTPUT:" containing that failing test output (or "RED_PHASE_OUTPUT: N/A - <reason>" for non-behavioral tasks such as docs or config). Finally, output only OK or FAIL. tasks.txt is a user-managed file and must not be modified. After outputting OK or FAIL, complete the session without waiting for user input.
 ```
 
 ### Step 2: 結果判定
@@ -133,7 +133,7 @@ grep -iE 'rate.?limit|usage.?limit|quota|\b429\b|too many requests|exceeded your
 ### Step 3: claude -p フォールバック（使用制限検知時のみ）
 
 ```bash
-unset CLAUDECODE && echo "" | claude -p "<claude_prompt>" --max-turns 60 --enable-auto-mode --verbose
+unset CLAUDECODE && echo "" | claude -p "<claude_prompt>" --max-turns 60 --enable-auto-mode --verbose 2>&1 | tee "$run_dir/claude-$attempt.log"
 ```
 
 > **Note:** `unset CLAUDECODE` は親セッション（このスクリプトを呼んでいる claude）からのネスト起動を許可するため。
@@ -141,7 +141,7 @@ unset CLAUDECODE && echo "" | claude -p "<claude_prompt>" --max-turns 60 --enabl
 `<claude_prompt>` は以下（codex_prompt とほぼ同じだが AGENTS.md → CLAUDE.md）:
 
 ```
-Execute only this single task (<task_id> <task_title>) according to the instructions in CLAUDE.md and the spec documents in .kiro/specs/$1/ (requirements.md, design.md, tasks.md). Before starting, output the task name (<task_id> <task_title>). After completing the task, run UnityTestRunner to verify the result. If any file changes exist, run git add -A and then commit. The commit title must be the task name "<task_id> <task_title>" as-is. The commit body must contain a brief summary of what was done (files created/modified, key changes). Use a multi-line commit message with git commit -m "title" -m "body". Finally, output only OK or FAIL. tasks.txt is a user-managed file and must not be modified. After outputting OK or FAIL, complete the session without waiting for user input.
+Execute only this single task (<task_id> <task_title>) according to the instructions in CLAUDE.md and the spec documents in .kiro/specs/$1/ (requirements.md, design.md, tasks.md). Before starting, output the task name (<task_id> <task_title>). After completing the task, run UnityTestRunner to verify the result. If any file changes exist, run git add -A and then commit. The commit title must be the task name "<task_id> <task_title>" as-is. The commit body must contain a brief summary of what was done (files created/modified, key changes). Use a multi-line commit message with git commit -m "title" -m "body". Before implementing behavior, write or update the tests first and run them to confirm they fail; before the final line, print a section that starts with "RED_PHASE_OUTPUT:" containing that failing test output (or "RED_PHASE_OUTPUT: N/A - <reason>" for non-behavioral tasks such as docs or config). Finally, output only OK or FAIL. tasks.txt is a user-managed file and must not be modified. After outputting OK or FAIL, complete the session without waiting for user input.
 ```
 
 フォールバック後の結果判定:
@@ -156,10 +156,10 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 - レビューエンジン: 実装が codex なら `claude -p`、実装が claude（フォールバック）なら `codex exec`。どちらも使えない場合はこのセッション（オーケストレーター）自身がレビューする。
 - レビュー対象: この試行で作られたコミット（`git diff "$pre_head"..HEAD`）**だけ**。レビューの前に、作業ツリーに未コミットの変更が残っていれば Working Tree Baseline の手順 1 で stash して「コミット漏れ」としてサマリーに記録し、レビューした内容とブランチに残る内容を一致させる（承認された変更を後から捨てることがないように）。
-- レビュアーへの指示（`<feature>` / `<task_id>` / `<task_title>` / `<pre_head>` は実値に置換）:
+- 実装者の報告: 実装エンジンの出力を保存した試行ログ（`$run_dir/codex-<attempt>.log` または `$run_dir/claude-<attempt>.log`）をレビュアーに渡す。kiro-review は behavioral task の `RED_PHASE_OUTPUT` を必須入力とするため、実装プロンプトでその出力を求めている。ログに `RED_PHASE_OUTPUT:` が無い behavioral task は、レビュアーの判定どおり REJECTED として扱う。
 
 ```
-Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read requirements.md, design.md and tasks.md yourself). Run `git diff <pre_head>..HEAD` to see the committed changes (that diff is the whole scope of this review); do not trust the implementer's summary. Apply the kiro-review protocol (.agents/skills/kiro-review/SKILL.md): check that the change implements this task's requirements and design, stays within the task's boundary (no unrelated files or other tasks' work), includes or updates the tests the task requires and that those tests were run, and introduces no regressions or placeholder code. Do not modify any files. End with exactly:
+Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read requirements.md, design.md and tasks.md yourself). The implementer's report is the attempt log at <attempt_log>; take RED_PHASE_OUTPUT from its "RED_PHASE_OUTPUT:" section (use it as the status report input that kiro-review expects, and verify it independently). Run `git diff <pre_head>..HEAD` to see the committed changes (that diff is the whole scope of this review); do not trust the implementer's summary. Apply the kiro-review protocol (.agents/skills/kiro-review/SKILL.md): check that the change implements this task's requirements and design, stays within the task's boundary (no unrelated files or other tasks' work), includes or updates the tests the task requires and that those tests were run, and introduces no regressions or placeholder code. Do not modify any files. End with exactly:
 ## Review Verdict
 - VERDICT: APPROVED | REJECTED
 - FINDINGS: <one line per finding, or "none">
@@ -176,7 +176,7 @@ Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read req
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
-- **依存関係**: 各タスクの実行前に、tasks.md にある当該タスクの `_Depends: X.Y, ..._`（同じ spec 内のタスク ID）を確認する。参照先が tasks.md で `[x]` でもなく、この実行で OK（レビュー APPROVED）にもなっていない場合（FAIL / TIMEOUT / SKIPPED / 未実行）は、そのタスクを実行せず `SKIPPED (blocked by X.Y)` として記録する。ブロックは推移的に伝わる（ブロックされたタスクに依存するタスクもブロックする）。ブロックによる SKIPPED は連続失敗ガードの回数に数えない
+- **依存関係**: 各タスクの実行前に、tasks.md にある当該タスクの `_Depends: X.Y, ..._`（同じ spec 内のタスク ID）を確認する。参照先が tasks.md で `[x]` でもなく、この実行で OK（レビュー APPROVED）にもなっていない場合（FAIL / TIMEOUT / SKIPPED / 未実行）は、そのタスクを実行せず `SKIPPED (blocked by X.Y)` として記録する。さらに、tasks.md では記述順が主要な依存関係なので、`(P)` の付いていないタスクは**同じ spec 内で直前の leaf タスク**にも暗黙に依存するとみなし、直前のタスクが `[x]` でもこの実行で OK でもなければ同様に `SKIPPED (blocked by X.Y)` とする（`(P)` のタスクは明示した `_Depends:` だけを見る）。ブロックは推移的に伝わる（ブロックされたタスクに依存するタスクもブロックする）。ブロックによる SKIPPED は連続失敗ガードの回数に数えない
 - **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録し、Working Tree Baseline の手順で `pre_head` に戻して（作業は退避して）から自動的に次のタスクへ進む
 - ただし **3 タスク連続で FAIL/TIMEOUT（レビュー REJECTED を含む）** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスクを SKIPPED として記録してサマリーへ進む
 - 途中のタスクが FAIL でも後続タスクは独立して試行する（依存で連鎖失敗する場合は上記の連続失敗ガードで止まる）
