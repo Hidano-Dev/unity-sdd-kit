@@ -2,6 +2,13 @@
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
+# 旧 unity-sdd-template 時代に TemplateProject を Unity で開いた際のローカル生成物
+# (TemplateProject は unity-project-template へ移管済み。先頭の / でリポジトリルート直下だけに限定する)
+/TemplateProject/Library/
+/TemplateProject/Logs/
+/TemplateProject/UserSettings/
+/TemplateProject/TemplateProject.sln
+
 # OS / editor
 .DS_Store
 Thumbs.db
