@@ -23,8 +23,9 @@ argument-hint: <feature-name-1> <feature-name-2> [feature-name-3] ...
 各 feature-name について以下を確認:
 - `.kiro/specs/<feature>/` が存在する
 - `.kiro/specs/<feature>/tasks.md` が存在する
+- `.kiro/specs/<feature>/spec.json` で `approvals.requirements.approved` / `approvals.design.approved` / `approvals.tasks.approved` がすべて true、かつ `ready_for_implementation` が true（レビュー前の草案に対して無人実装を始めない）
 
-いずれかが欠ける spec があれば、その spec 名を明示して `/kiro:spec-tasks <feature>` で tasks 生成を先に完了するよう案内し、その spec を batch から除外する。除外後に残りが 1 spec 以下なら本 skill は終了（`/kiro:spec-run` に誘導）。
+いずれかを満たさない spec があれば、その spec 名と理由を明示して（tasks 未生成なら `/kiro:spec-tasks <feature>`、未承認なら各フェーズのレビューと承認を）先に完了するよう案内し、その spec を batch から除外する。除外後に残りが 1 spec 以下なら本 skill は終了（`/kiro:spec-run` に誘導）。
 
 Codex の存在確認:
 - `codex --version` を実行。成功すれば codex-first モード。
@@ -38,6 +39,7 @@ Codex の存在確認:
 - Feature name (引数の宣言順を保持)
 - Task ID (例: "1.1", "2", "4.3")
 - Task title (ID の後ろのテキスト)
+- Depends（タスク詳細の `_Depends: X.Y, ..._` に列挙されたタスク ID。無ければ空）
 
 Container task（サブタスクを持つ親タスク）はスキップし、leaf-level（実行可能）のタスクのみを含める。
 
@@ -69,29 +71,33 @@ Container task（サブタスクを持つ親タスク）はスキップし、lea
 umask 077
 run_dir=$(mktemp -d)                       # この実行専用の私有ディレクトリ（ログ・退避物の置き場）
 run_id=$(date +%Y%m%d-%H%M%S)-$$           # 退避ブランチ名を実行ごとに一意にするための ID
-# 生成物（Unity の Library/Temp/Logs/obj/UserSettings やビルド出力）を除いた ignored ファイルの一覧
-gen_re='(^|/)(Library|Temp|Logs|obj|UserSettings|Builds?|MemoryCaptures|node_modules)/'
-git ls-files -o -i --exclude-standard -z | grep -zvE "$gen_re" > "$run_dir/ignored.list" || true
-tar --null -T "$run_dir/ignored.list" -cf "$run_dir/ignored-baseline.tar" 2>/dev/null || true
-(xargs -0 -r sha256sum < "$run_dir/ignored.list") > "$run_dir/ignored.sha256" 2>/dev/null || true
 ```
 
 - `git status --porcelain` が空であることを確認する。未コミットの変更があれば実行を開始せず、その旨を報告して終了する（既存の変更を巻き込まないためのハードゲート。無人実行でも例外にしない）。
 - Bash ツールの呼び出し間でシェル変数は保持されないため、上で決まった `run_dir` / `run_id` の実際の値を以降のコマンドに埋め込んで使う（`pre_head` / `attempt` も同様）。
 - タスクのログは `$run_dir` の下に置く（例: `"$run_dir/codex-<attempt>.log"`）。共有の `/tmp` 固定パスは使わない。
 
-**各タスクの開始直前**: `pre_head=$(git rev-parse HEAD)` を記録し、試行番号 `attempt` を 1 つ進める（フォールバックも別の試行として数える）。
+**各試行の開始直前**（フォールバックも別の試行として数える）: 試行番号 `attempt` を 1 つ進め、`pre_head=$(git rev-parse HEAD)` を記録し、**その時点の** ignored ファイルのスナップショットを取る（成功したタスクが意図して変えた ignored ファイルを、後続の失敗時に巻き戻さないため、基準は試行ごとに取り直す）:
 
-**タスクが OK 以外（FAIL / TIMEOUT）で終わったとき、および使用制限で claude -p にフォールバックする前**は、次の手順で `pre_head` の状態へ戻す。失敗した作業は捨てずに退避する:
+```bash
+snap="$run_dir/a$attempt"; mkdir -p "$snap"
+# 生成物（Unity の Library/Temp/Logs/obj/UserSettings やビルド出力）を除いた ignored ファイル
+gen_re='(^|/)(Library|Temp|Logs|obj|UserSettings|Builds?|MemoryCaptures|node_modules)/'
+git ls-files -o -i --exclude-standard -z | grep -zvE "$gen_re" > "$snap/ignored.list" || true
+tar --null -T "$snap/ignored.list" -cf "$snap/ignored.tar" 2>/dev/null || true
+(xargs -0 -r sha256sum < "$snap/ignored.list") > "$snap/ignored.sha256" 2>/dev/null || true
+```
+
+**試行が OK 以外（FAIL / TIMEOUT / レビュー REJECTED / 依存未充足で中断）で終わったとき、および使用制限で claude -p にフォールバックする前**は、次の手順でその試行の開始時点へ戻す。失敗した作業は捨てずに退避する:
 
 1. 追跡対象・untracked の変更があれば `git stash push -u -m "spec-run failed: <feature> <task_id> (run $run_id, attempt $attempt)"`
 2. HEAD が `pre_head` から進んでいれば `git branch "spec-run-failed/$run_id/<feature>/<task_id>-$attempt" HEAD` で退避してから `git reset --hard "$pre_head"`
-3. ignored ファイルを開始時のスナップショットと比べる（`gen_re` に当たる生成物は対象外）。開始後に増えた・変わった ignored ファイルは `"$run_dir/failed-$attempt/"` へ移動して退避し、変更・削除されたものは `"$run_dir/ignored-baseline.tar"` から復元する
+3. ignored ファイルを**その試行の**スナップショット（`$run_dir/a$attempt`）と比べる（`gen_re` に当たる生成物は対象外）。試行中に増えた・変わった ignored ファイルは `"$run_dir/failed-$attempt/"` へ移動して退避し、変更・削除されたものは `"$run_dir/a$attempt/ignored.tar"` から復元する
 4. 退避先（stash メッセージ / ブランチ名 / `$run_dir/failed-*`）をサマリーに記録する
 
-**OK のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。ignored ファイルが変わっていれば、意図した変更かどうかをサマリーで報告する。
+**OK（レビュー APPROVED）のタスクでも**、終了後に未コミットの変更が残っていれば同じく stash して記録する（コミット漏れを次のタスクに持ち込まない）。ignored ファイルが変わっていれば、意図した変更かどうかをサマリーで報告する。
 
-**終了時**: ログは不要になったら `$run_dir` ごと削除してよいが、退避物（`failed-*`）がある場合は残し、その場所をサマリーに明記する。
+**終了時**: ログとスナップショットは不要になったら削除してよいが、退避物（`failed-*`）がある場合は残し、その場所をサマリーに明記する。
 
 ## Execute Tasks
 
@@ -122,7 +128,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 判定の優先順位（`/kiro:spec-run` と同等）:
 
-1. **codex 出力末尾に `OK`** → タスク成功（OK として記録、次のタスクへ）
+1. **codex 出力末尾に `OK`** → 実装完了。Step 4 の独立レビューへ進む（APPROVED になるまで OK として記録しない）
 2. **codex 出力末尾に `FAIL`** → タスク失敗（FAIL として記録、自動的に次のタスクへ）
 3. **codex_exit が非ゼロ かつ ログに使用制限シグネチャあり** → 使用制限ヒット → Working Tree Baseline の手順で `pre_head` に戻してから Step 3 へフォールバック
 4. **codex_exit が非ゼロ かつ シグネチャ無し** → 通常の実行失敗（FAIL として記録、自動的に次のタスクへ）
@@ -151,10 +157,30 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 ```
 
 フォールバック後の結果判定:
-- 出力末尾の `OK` / `FAIL` で判定。
+- 出力末尾の `OK` / `FAIL` で判定。`OK` の場合も Step 4 の独立レビューを通す。
 - exit code 非ゼロ → FAIL 扱い。
 - タイムアウト → TIMEOUT 扱い。
 - claude 側でも使用制限を踏んだ場合は FAIL として記録し、自動的に次のタスクへ進む（さらなるフォールバック先は無い。連続失敗ガードに委ねる）。
+
+### Step 4: 独立レビュー（実装エンジンが OK を出したタスクのみ）
+
+実装したエージェント自身の `OK` だけでタスクを成功扱いにしない。後続タスクが未レビューの変更を前提に進まないよう、**次のタスクへ進む前に**、実装とは別系統のエンジンでそのタスクの差分をレビューする:
+
+- レビューエンジン: 実装が codex なら `claude -p`、実装が claude（フォールバック）なら `codex exec`。どちらも使えない場合はこのセッション（オーケストレーター）自身がレビューする。
+- レビュー対象: `git diff "$pre_head"..HEAD`（この試行で作られたコミット）と、作業ツリーに残った変更。
+- レビュアーへの指示（`<feature>` / `<task_id>` / `<task_title>` / `<pre_head>` は実値に置換）:
+
+```
+Review only task <task_id> <task_title> of spec .kiro/specs/<feature>/ (read requirements.md, design.md and tasks.md yourself). Run `git diff <pre_head>..HEAD` and `git status --porcelain` to see the actual changes; do not trust the implementer's summary. Apply the kiro-review protocol (.agents/skills/kiro-review/SKILL.md): check that the change implements this task's requirements and design, stays within the task's boundary (no unrelated files or other tasks' work), includes or updates the tests the task requires and that those tests were run, and introduces no regressions or placeholder code. Do not modify any files. End with exactly:
+## Review Verdict
+- VERDICT: APPROVED | REJECTED
+- FINDINGS: <one line per finding, or "none">
+```
+
+- `## Review Verdict` ブロックの `- VERDICT:` からだけ判定する（周囲の文章から推測しない）。判定が読めない場合は 1 回だけ再依頼し、それでも読めなければ REJECTED として扱う。
+- **APPROVED** → タスクを OK として記録する（tasks.md のチェックとコミットは実装エンジンが行ったものをそのまま使う）。
+- **REJECTED** → タスクを `FAIL (review)` として記録し、指摘をサマリーに転記したうえで、Working Tree Baseline の手順でこの試行の開始時点に戻す（コミットは退避ブランチへ逃がす）。無人実行中に修正ループへは入らない。
+- レビュー実行自体が失敗・タイムアウトした場合も REJECTED と同じに扱う（未レビューの変更を残さない）。
 
 ### Execution Rules
 
@@ -162,8 +188,9 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 - 各実行（codex / claude いずれも）に 30 分タイムアウト（1800 秒）を Bash tool の timeout パラメータで設定
 - フォールバック発動時は **そのタスクのみ** claude -p に切り替える。次のタスクではまた codex から試行する（永続切替はしない）
 - After each task completes, report which spec / engine was used (codex / claude-fallback) and exit status (OK/FAIL/TIMEOUT) before proceeding to the next
+- **依存関係**: 各タスクの実行前に、tasks.md にある当該タスクの `_Depends: X.Y, ..._`（同じ spec 内のタスク ID）を確認する。参照先が tasks.md で `[x]` でもなく、この実行で OK（レビュー APPROVED）にもなっていない場合（FAIL / TIMEOUT / SKIPPED / 未実行）は、そのタスクを実行せず `SKIPPED (blocked by X.Y)` として記録する。ブロックは推移的に伝わる（ブロックされたタスクに依存するタスクもブロックする）。ブロックによる SKIPPED は連続失敗ガードの回数に数えない
 - **無人実行前提のため、失敗してもユーザーに継続確認しない。** FAIL/TIMEOUT のタスクは記録し、Working Tree Baseline の手順で `pre_head` に戻して（作業は退避して）から自動的に次のタスクへ進む
-- ただし **3 タスク連続で FAIL/TIMEOUT** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスク（後続 spec を含む）を SKIPPED として記録して実装検証へ進む
+- ただし **3 タスク連続で FAIL/TIMEOUT（レビュー REJECTED を含む）** した場合は環境・前提の問題（ビルド破損、Unity 起動不能など）の可能性が高いため、そこで実行を打ち切り、残タスク（後続 spec を含む）を SKIPPED として記録して実装検証へ進む
 - spec の境界をまたいでも処理は連続する（spec1 の途中で FAIL しても spec1 の残り → spec2 へ進む）
 
 ## Validate Implementation
@@ -188,7 +215,7 @@ Execute only this single task (<task_id> <task_title>) according to the instruct
 
 | Spec | Task ID | Title | Engine | Result |
 |------|---------|-------|--------|--------|
-| ...  | ...     | ...   | codex / claude-fallback | OK/FAIL/TIMEOUT/SKIPPED |
+| ...  | ...     | ...   | codex / claude-fallback | OK/FAIL/FAIL (review)/TIMEOUT/SKIPPED/SKIPPED (blocked by X.Y) |
 
 サマリーテーブルの直後に、spec ごとの **Validation Results** を必ず記載する:
 
